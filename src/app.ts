@@ -1,4 +1,5 @@
 import express, { Express, Request, Response } from 'express';
+import path from 'path';
 import cors from 'cors';
 import helmet from 'helmet';
 import routes from './routes';
@@ -19,6 +20,9 @@ app.use(
 // Body parsers
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Uploaded leave attachments (public read for authenticated frontend usage)
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
 
 // Main API routes
 app.use('/api', routes);
