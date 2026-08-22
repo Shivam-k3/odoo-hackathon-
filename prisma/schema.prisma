@@ -1,0 +1,65 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  role         String    @default("EMPLOYEE") // EMPLOYEE, ADMIN_HR
+  status       String    @default("ACTIVE")   // ACTIVE, INACTIVE, PENDING
+  employee     Employee?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@map("users")
+}
+
+model Employee {
+  id             String       @id @default(uuid())
+  userId         String       @unique
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loginId        String       @unique
+  firstName      String
+  lastName       String
+  email          String       @unique
+  phone          String?
+  profilePicture String?
+  department     String?
+  designation    String?
+  joiningDate    DateTime     @default(now())
+  address        String?
+  dob            DateTime?
+  gender         String?
+  about          String?
+  skills         String?      // JSON array of strings
+  certifications String?      // JSON array of strings
+  salary         Float?
+  attendances    Attendance[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@map("employees")
+}
+
+model Attendance {
+  id           String    @id @default(uuid())
+  employeeId   String
+  employee     Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date         String    // Format: YYYY-MM-DD
+  checkInTime  DateTime?
+  checkOutTime DateTime?
+  workHours    Float     @default(0.0)
+  extraHours   Float     @default(0.0)
+  status       String    @default("PRESENT") // PRESENT, ABSENT, HALF_DAY, LEAVE
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@unique([employeeId, date])
+  @@map("attendances")
+}
