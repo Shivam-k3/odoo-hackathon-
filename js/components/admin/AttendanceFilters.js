@@ -3,16 +3,17 @@
 //   att-filter-search · att-filter-employee · att-filter-status
 //   att-filter-date · att-filter-month · att-filter-clear
 
-import { DEPARTMENTS } from '../../data/adminMockData.js';
+import { esc } from '../../core/api.js';
+import { DEPARTMENT_OPTIONS } from '../../core/adminStore.js';
 
 export function AttendanceFilters(employees, values = {}, opts = {}) {
   const { showDate = true, showMonth = false, showStatus = true } = opts;
   const employeeOptions = employees.map(e =>
-    `<option value="${e.id}" ${values.employeeId === e.id ? 'selected' : ''}>${e.name} (${e.id})</option>`
+    `<option value="${esc(e.id)}" ${values.employeeId === e.id ? 'selected' : ''}>${esc(e.name)} (${esc(e.loginId || e.id)})</option>`
   ).join('');
 
-  const statusOptions = ['Present', 'Absent', 'Half-day', 'Leave'].map(s =>
-    `<option value="${s}" ${values.status === s ? 'selected' : ''}>${s}</option>`
+  const statusOptions = ['PRESENT', 'HALF_DAY', 'ABSENT', 'LEAVE'].map(s =>
+    `<option value="${s}" ${values.status === s ? 'selected' : ''}>${s.replace('_', '-')}</option>`
   ).join('');
 
   return `
@@ -20,7 +21,7 @@ export function AttendanceFilters(employees, values = {}, opts = {}) {
       <div class="filter-group grow-lg">
         <label class="filter-label" for="att-filter-search">Search</label>
         <input type="text" id="att-filter-search" class="form-input" placeholder="Name or ID..."
-               value="${values.search || ''}" />
+               value="${esc(values.search || '')}" />
       </div>
 
       <div class="filter-group">
@@ -64,10 +65,10 @@ export function AttendanceFilters(employees, values = {}, opts = {}) {
 
 export function EmployeeSelectOptions(employees, selectedId = '') {
   return employees.map(e =>
-    `<option value="${e.id}" ${e.id === selectedId ? 'selected' : ''}>${e.name} (${e.id})</option>`
+    `<option value="${esc(e.id)}" ${e.id === selectedId ? 'selected' : ''}>${esc(e.name)} (${esc(e.loginId || e.id)})</option>`
   ).join('');
 }
 
 export function DepartmentOptions(selected = '') {
-  return DEPARTMENTS.map(d => `<option value="${d}" ${d === selected ? 'selected' : ''}>${d}</option>`).join('');
+  return DEPARTMENT_OPTIONS.map(d => `<option value="${d}" ${d === selected ? 'selected' : ''}>${d}</option>`).join('');
 }

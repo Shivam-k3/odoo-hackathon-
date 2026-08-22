@@ -1,17 +1,18 @@
-// DAYFLOW HRMS — ADMIN NAVBAR COMPONENT
+// DAYFLOW HRMS — ADMIN NAVBAR COMPONENT (REAL BACKEND DATA)
 // Global search · notifications · admin profile · logout
 
 import { store } from '../../core/store.js';
 import { router } from '../../core/router.js';
+import { api, esc } from '../../core/api.js';
+import { authService } from '../../core/authService.js';
 import { adminStore } from '../../core/adminStore.js';
 import { getInitials } from './EmployeeCard.js';
 
-const NOTIF_TONES = {
-  info: { bg: 'var(--info-bg)', fg: 'var(--info)' },
-  success: { bg: 'var(--success-bg)', fg: 'var(--success)' },
-  warning: { bg: 'var(--warning-bg)', fg: '#b06000' },
-  danger: { bg: 'var(--danger-bg)', fg: 'var(--danger)' },
-  neutral: { bg: 'var(--bg-subtle)', fg: 'var(--text-secondary)' }
+const NOTIF_ICONS = {
+  LEAVE_APPROVED: 'check-circle',
+  LEAVE_REJECTED: 'x-circle',
+  PAYSLIP_AVAILABLE: 'receipt',
+  default: 'bell',
 };
 
 let outsideClickInstalled = false;
@@ -29,32 +30,40 @@ function installOutsideClickCloser() {
   });
 }
 
+// Server-backed notification cache (read-state lives in PostgreSQL).
+let notifCache = [];
+
+async function loadNotifications() {
+  try {
+    const data = await api.get('/api/notifications/me?limit=10');
+    notifCache = data.notifications || [];
+  } catch (_) {
+    notifCache = [];
+  }
+}
+
 function renderNotifItems() {
-  const notifications = adminStore.getNotifications();
-  if (!notifications.length) {
+  if (!notifCache.length) {
     return '<p style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px;">You are all caught up!</p>';
   }
-  return notifications.map(n => {
-    const tone = NOTIF_TONES[n.tone] || NOTIF_TONES.neutral;
-    return `
-      <div class="notif-item ${n.read ? '' : 'unread'}">
-        <div class="notif-icon" style="background-color:${tone.bg}; color:${tone.fg};">
-          <i data-lucide="${n.icon}" style="width:15px;height:15px;"></i>
-        </div>
-        <div style="min-width:0;">
-          <div class="notif-title">${n.title}</div>
-          <div class="notif-desc">${n.desc}</div>
-          <div class="notif-time">${n.time}</div>
-        </div>
+  return notifCache.map(n => `
+    <div class="notif-item ${n.read ? '' : 'unread'}">
+      <div class="notif-icon" style="background-color:var(--primary-light); color:var(--primary);">
+        <i data-lucide="${esc(NOTIF_ICONS[n.type] || NOTIF_ICONS.default)}" style="width:15px;height:15px;"></i>
       </div>
-    `;
-  }).join('');
+      <div style="min-width:0;">
+        <div class="notif-title">${esc(n.title)}</div>
+        <div class="notif-desc">${esc(n.body)}</div>
+        <div class="notif-time">${esc(String(n.createdAt || '').slice(0, 10))}</div>
+      </div>
+    </div>
+  `).join('');
 }
 
 export function renderAdminNavbar(pageTitle = 'Admin') {
   const user = store.getState().user || {};
-  const unread = adminStore.unreadNotificationCount();
   const todayStr = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const hasUnread = notifCache.some(n => !n.read);
 
   return `
     <header class="navbar">
@@ -62,7 +71,7 @@ export function renderAdminNavbar(pageTitle = 'Admin') {
         <button class="menu-toggle-btn" id="mobile-menu-btn" title="Toggle Sidebar">
           <i data-lucide="menu" style="width: 20px; height: 20px;"></i>
         </button>
-        <h1 class="page-title">${pageTitle}</h1>
+        <h1 class="page-title">${esc(pageTitle)}</h1>
       </div>
 
       <div class="navbar-right">
@@ -81,14 +90,14 @@ export function renderAdminNavbar(pageTitle = 'Admin') {
         <div class="notif-wrapper">
           <button class="icon-btn" id="admin-notif-btn" title="Notifications">
             <i data-lucide="bell" style="width: 20px; height: 20px;"></i>
-            ${unread ? '<span class="notification-dot"></span>' : ''}
+            ${hasUnread ? '<span class="notification-dot"></span>' : ''}
           </button>
           <div class="notif-panel" id="admin-notif-panel">
             <div class="notif-panel-header">
               <span>Notifications</span>
               <button class="btn btn-secondary btn-xs" id="admin-notif-clear">Mark all read</button>
             </div>
-            <div class="notif-list">${renderNotifItems()}</div>
+            <div class="notif-list"><p style="padding:20px;text-align:center;color:var(--text-tertiary);font-size:13px;">Loading…</p></div>
           </div>
         </div>
 
@@ -100,8 +109,8 @@ export function renderAdminNavbar(pageTitle = 'Admin') {
 
           <div class="dropdown-menu" id="admin-user-dropdown">
             <div class="dropdown-header">
-              <div class="dropdown-user-name">${user.name || 'Admin'}</div>
-              <div class="dropdown-user-role">${user.role || 'Admin'} · ${user.id || ''}</div>
+              <div class="dropdown-user-name">${esc(user.name || 'Admin')}</div>
+              <div class="dropdown-user-role">${esc(user.role || 'ADMIN_HR')}</div>
             </div>
             <button class="dropdown-item danger" id="admin-logout-btn">
               <i data-lucide="log-out" style="width: 16px; height: 16px;"></i>
@@ -114,12 +123,19 @@ export function renderAdminNavbar(pageTitle = 'Admin') {
   `;
 }
 
-export function refreshNotifPanel() {
+export async function refreshNotifPanel() {
+  await loadNotifications();
   const panel = document.getElementById('admin-notif-panel');
   if (!panel) return;
-  panel.querySelector('.notif-list').innerHTML = renderNotifItems();
+  const list = panel.querySelector('.notif-list');
+  if (list) list.innerHTML = renderNotifItems();
   if (window.lucide) window.lucide.createIcons();
+
+  const dot = document.querySelector('#admin-notif-btn .notification-dot');
+  if (dot && !notifCache.some(n => !n.read)) dot.remove();
 }
+
+let searchDebounceTimer = null;
 
 export function initAdminNavbarEvents() {
   installOutsideClickCloser();
@@ -134,22 +150,30 @@ export function initAdminNavbarEvents() {
     });
   }
 
-  // Notifications toggle
+  // Notifications toggle + server load on open
   const notifBtn = document.getElementById('admin-notif-btn');
   const notifPanel = document.getElementById('admin-notif-panel');
   if (notifBtn && notifPanel) {
-    notifBtn.addEventListener('click', (e) => {
+    notifBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
       notifPanel.classList.toggle('show');
+      if (notifPanel.classList.contains('show')) await refreshNotifPanel();
     });
 
     const clearBtn = document.getElementById('admin-notif-clear');
     if (clearBtn) {
-      clearBtn.addEventListener('click', () => {
-        adminStore.markAllNotificationsRead();
-        refreshNotifPanel();
-        const dot = notifBtn.querySelector('.notification-dot');
-        if (dot) dot.remove();
+      clearBtn.addEventListener('click', async () => {
+        clearBtn.disabled = true;
+        try {
+          const unread = notifCache.filter(n => !n.read);
+          await Promise.all(unread.map(n => api.post(`/api/notifications/${n.id}/read`, {})));
+          await refreshNotifPanel();
+          showToastSafe('All notifications marked as read.');
+        } catch (err) {
+          showToastSafe(err.message || 'Could not update notifications.', 'danger');
+        } finally {
+          clearBtn.disabled = false;
+        }
       });
     }
   }
@@ -166,46 +190,59 @@ export function initAdminNavbarEvents() {
 
   const logoutBtn = document.getElementById('admin-logout-btn');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
-      store.logout(); // clears shared mock session
+    logoutBtn.addEventListener('click', async () => {
+      await authService.logout(); // real backend logout + token cleanup
+      store.logout();
       router.navigate('/login');
     });
   }
 
-  // Global employee search
+  // Global employee search — debounced live API query
   const searchInput = document.getElementById('admin-global-search');
   const resultsPanel = document.getElementById('admin-search-results');
   if (searchInput && resultsPanel) {
     searchInput.addEventListener('input', () => {
+      clearTimeout(searchDebounceTimer);
       const q = searchInput.value.trim();
       if (!q) {
         resultsPanel.classList.remove('show');
         resultsPanel.innerHTML = '';
         return;
       }
-      const matches = adminStore.queryEmployees({ search: q }).slice(0, 6);
-      resultsPanel.innerHTML = matches.length
-        ? matches.map(emp => `
-            <button class="search-result-item" data-emp-id="${emp.id}">
-              <span class="av-circle av-sm" style="${adminStore.avatarStyle(Number(emp.id.slice(-2)) || 0)}">${getInitials(emp.name)}</span>
-              <span style="flex:1; min-width:0;">
-                <span style="display:block; font-weight:600; font-size:13px;">${emp.name}</span>
-                <span style="display:block; font-size:12px; color:var(--text-secondary);">${emp.id} · ${emp.department}</span>
-              </span>
-              <i data-lucide="arrow-right" style="width:14px;height:14px;color:var(--text-tertiary);"></i>
-            </button>
-          `).join('')
-        : '<p style="padding:14px;font-size:13px;color:var(--text-tertiary);">No employees found.</p>';
+      searchDebounceTimer = setTimeout(async () => {
+        resultsPanel.classList.add('show');
+        resultsPanel.innerHTML = '<p style="padding:14px;font-size:13px;color:var(--text-tertiary);">Searching…</p>';
+        try {
+          const data = await adminStore.queryEmployees({ search: q, limit: 6 });
+          const matches = data.employees || [];
+          resultsPanel.innerHTML = matches.length
+            ? matches.map(emp => {
+                const name = `${emp.firstName} ${emp.lastName}`.trim();
+                return `
+                  <button class="search-result-item" data-emp-id="${esc(emp.id)}">
+                    <span class="av-circle av-sm" style="${adminStore.avatarStyle(name.length)}">${getInitials(name)}</span>
+                    <span style="flex:1; min-width:0;">
+                      <span style="display:block; font-weight:600; font-size:13px;">${esc(name)}</span>
+                      <span style="display:block; font-size:12px; color:var(--text-secondary);">${esc(emp.loginId)} · ${esc(emp.department || 'General')}</span>
+                    </span>
+                    <i data-lucide="arrow-right" style="width:14px;height:14px;color:var(--text-tertiary);"></i>
+                  </button>
+                `;
+              }).join('')
+            : '<p style="padding:14px;font-size:13px;color:var(--text-tertiary);">No employees found.</p>';
 
-      resultsPanel.classList.add('show');
-      if (window.lucide) window.lucide.createIcons();
+          if (window.lucide) window.lucide.createIcons();
 
-      resultsPanel.querySelectorAll('[data-emp-id]').forEach(btn => {
-        btn.addEventListener('mousedown', (e) => { // mousedown beats blur
-          e.preventDefault();
-          router.navigate(`/admin/employees/${btn.dataset.empId}`);
-        });
-      });
+          resultsPanel.querySelectorAll('[data-emp-id]').forEach(btn => {
+            btn.addEventListener('mousedown', (e) => { // mousedown beats blur
+              e.preventDefault();
+              router.navigate(`/admin/employees/${btn.dataset.empId}`);
+            });
+          });
+        } catch (err) {
+          resultsPanel.innerHTML = `<p style="padding:14px;font-size:13px;color:var(--danger);">${esc(err.message || 'Search failed.')}</p>`;
+        }
+      }, 300);
     });
 
     searchInput.addEventListener('keydown', (e) => {
@@ -219,4 +256,8 @@ export function initAdminNavbarEvents() {
       }
     });
   }
+}
+
+function showToastSafe(msg, tone = 'info') {
+  import('../../components/Toast.js').then(({ showToast }) => showToast(msg, tone));
 }

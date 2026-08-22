@@ -1,15 +1,24 @@
-// DAYFLOW HRMS — ADMIN SIDEBAR COMPONENT
+// DAYFLOW HRMS — ADMIN SIDEBAR COMPONENT (REAL BACKEND DATA)
 // Admin/HR navigation only. Employee pages are intentionally NOT listed here,
 // and the employee sidebar never lists admin pages.
 
 import { store } from '../../core/store.js';
+import { esc } from '../../core/api.js';
 import { adminStore } from '../../core/adminStore.js';
+
+// Pending-leave badge count, refreshed from the API on each render cycle.
+let pendingLeaveCount = 0;
+
+export async function refreshPendingLeaveCount() {
+  pendingLeaveCount = await adminStore.getPendingLeaveCount();
+  return pendingLeaveCount;
+}
 
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/admin/dashboard', icon: 'layout-dashboard', match: p => p === '/admin/dashboard' },
   { label: 'Employees', path: '/admin/employees', icon: 'users', match: p => p.startsWith('/admin/employees') },
   { label: 'Attendance', path: '/admin/attendance', icon: 'clock', match: p => p === '/admin/attendance' },
-  { label: 'Leave', path: '/admin/leave', icon: 'calendar-days', match: p => p === '/admin/leave', badge: () => adminStore.getEmployeeLeaveStats().Pending },
+  { label: 'Leave', path: '/admin/leave', icon: 'calendar-days', match: p => p === '/admin/leave', badge: () => pendingLeaveCount },
   { label: 'Payroll', path: '/admin/payroll', icon: 'receipt', match: p => p === '/admin/payroll' },
   { label: 'Reports', path: '/admin/reports', icon: 'bar-chart-3', match: p => p === '/admin/reports' }
 ];
@@ -44,10 +53,10 @@ export function renderAdminSidebar(currentPath = '') {
 
       <div class="sidebar-footer">
         <div class="user-mini-card">
-          <div class="av-circle av-sm" style="${adminStore.avatarStyle(0)}">${(user.name || 'A').charAt(0)}</div>
+          <div class="av-circle av-sm" style="${adminStore.avatarStyle(0)}">${esc((user.name || 'A').charAt(0))}</div>
           <div style="overflow:hidden;">
-            <div style="font-weight:600; font-size:13px; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${user.name || 'Admin'}</div>
-            <div style="font-size:11px; color:var(--text-secondary);">${user.role || 'Admin'} · HR</div>
+            <div style="font-weight:600; font-size:13px; color:var(--text-main); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${esc(user.name || 'Admin')}</div>
+            <div style="font-size:11px; color:var(--text-secondary);">${esc(user.role || 'ADMIN_HR')} · HR</div>
           </div>
         </div>
       </div>

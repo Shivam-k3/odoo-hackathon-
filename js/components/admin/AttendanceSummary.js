@@ -1,7 +1,8 @@
 // DAYFLOW HRMS — ATTENDANCE SUMMARY COMPONENT (ADMIN)
 // Chip-style KPI strip for any set of attendance records.
+// Expects backend-style summary values in DECIMAL HOURS.
 
-import { formatHoursLabel } from '../../data/adminMockData.js';
+import { formatHoursLabel } from '../../core/adminStore.js';
 
 export function AttendanceSummary(summary = {}) {
   const items = [
@@ -9,8 +10,8 @@ export function AttendanceSummary(summary = {}) {
     { label: 'Absent', value: summary.absent ?? 0, icon: 'x-circle', bg: 'var(--warning-bg)', fg: '#b06000' },
     { label: 'Half-day', value: summary.halfDay ?? 0, icon: 'clock', bg: '#fff4e5', fg: '#b06000' },
     { label: 'On Leave', value: summary.leave ?? 0, icon: 'plane', bg: 'var(--info-bg)', fg: 'var(--info)' },
-    { label: 'Total Hours', value: formatHoursLabel(summary.totalMinutes), icon: 'timer', bg: 'var(--primary-light)', fg: 'var(--primary)', raw: true },
-    { label: 'Extra Hours', value: formatHoursLabel(summary.extraMinutes), icon: 'zap', bg: 'var(--primary-light)', fg: 'var(--info)', raw: true }
+    { label: 'Total Hours', value: formatHoursLabel(summary.totalWorkHours), icon: 'timer', bg: 'var(--primary-light)', fg: 'var(--primary)', raw: true },
+    { label: 'Extra Hours', value: formatHoursLabel(summary.totalExtraHours), icon: 'zap', bg: 'var(--primary-light)', fg: 'var(--info)', raw: true }
   ];
 
   return `

@@ -1,402 +1,207 @@
-// DAYFLOW HRMS — ADMIN / HR STATE STORE (MOCK)
-// Central mock data store for the admin console. Mirrors the employee-side
-// store pattern: plain observable state + localStorage persistence.
-// BACKEND INTEGRATION POINT: replace method bodies with REST calls later;
-// view code depends only on these stable contracts.
+// DAYFLOW HRMS — ADMIN SERVICE LAYER (REAL BACKEND APIs)
+// Thin async wrapper around the admin REST endpoints. Views own their loading/
+// error/empty states; this layer never fabricates business data.
 
-import {
-  EMPLOYEES, LEAVE_REQUESTS, SEED_ACTIVITY, SEED_NOTIFICATIONS,
-  generateMonthAttendance, CURRENT_MONTH, TODAY_ISO, NEXT_PAYOUT_DATE,
-  ADMIN_PROFILE, AVATAR_PALETTE
-} from '../data/adminMockData.js';
+import { api } from './api.js';
 
-const STORAGE_KEY = 'DAYFLOW_ADMIN_STATE_V1';
+// Small local palette so avatar tinting works without any mock dataset.
+const AVATAR_PALETTE = [
+  ['#e8f0fe', '#1967d2'], ['#fef7e0', '#b06000'], ['#e6f4ea', '#188038'],
+  ['#fce8e6', '#c5221f'], ['#f3e8fd', '#7627bb'], ['#e4f7fb', '#007b83'],
+];
 
-const nowStamp = () => {
-  const d = new Date();
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
-};
+export const DEPARTMENT_OPTIONS = [
+  'Engineering', 'Human Resources', 'Finance', 'Marketing',
+  'Sales', 'Operations', 'Design', 'Product', 'General',
+];
 
-let idCounter = 100;
-const nextLocalId = prefix => `${prefix}-${++idCounter}`;
-
-class AdminStore {
-  constructor() {
-    this.attendanceCache = null;
-    this.listeners = [];
-    this.state = this.load();
-  }
-
-  defaultState() {
-    return {
-      employees: JSON.parse(JSON.stringify(EMPLOYEES)),
-      leaveRequests: JSON.parse(JSON.stringify(LEAVE_REQUESTS)),
-      activity: JSON.parse(JSON.stringify(SEED_ACTIVITY)),
-      notifications: JSON.parse(JSON.stringify(SEED_NOTIFICATIONS)),
-      payrollOverrides: {}
-    };
-  }
-
-  load() {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) return { ...this.defaultState(), ...JSON.parse(saved) };
-    } catch (e) { /* corrupted storage -> reseed */ }
-    return this.defaultState();
-  }
-
-  save() {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
-    } catch (e) { /* storage full/unavailable -> keep in-memory only */ }
-    this.notify();
-  }
-
-  getState() {
-    return this.state;
-  }
-
-  subscribe(listener) {
-    this.listeners.push(listener);
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
-    };
-  }
-
-  notify() {
-    this.listeners.forEach(l => l(this.state));
-  }
-
+class AdminService {
   // ------------------------------------------------------------------ EMPLOYEES
 
-  getEmployees() {
-    return this.state.employees;
+  /** GET /api/employees?search=&department=&page=&limit= */
+  async queryEmployees({ search = '', department = '', page = 1, limit = 20 } = {}) {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (department) params.set('department', department);
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+    return api.get(`/api/employees?${params.toString()}`);
   }
 
+  /** GET /api/employees/:id */
   getEmployeeById(id) {
-    return this.state.employees.find(e => e.id === id) || null;
+    return api.get(`/api/employees/${id}`);
   }
 
-  queryEmployees({ search = '', department = '', status = '' } = {}) {
-    const q = search.trim().toLowerCase();
-    return this.state.employees.filter(emp => {
-      const matchesSearch = !q ||
-        emp.name.toLowerCase().includes(q) ||
-        emp.id.toLowerCase().includes(q) ||
-        emp.email.toLowerCase().includes(q) ||
-        emp.position.toLowerCase().includes(q);
-      const matchesDept = !department || emp.department === department;
-      const matchesStatus = !status || emp.employmentStatus === status;
-      return matchesSearch && matchesDept && matchesStatus;
-    });
-  }
-
+  /** PUT /api/employees/:id */
   updateEmployee(id, patch) {
-    const idx = this.state.employees.findIndex(e => e.id === id);
-    if (idx < 0) return false;
-    this.state.employees[idx] = { ...this.state.employees[idx], ...patch };
-    this.save();
-    this.logActivity({
-      icon: 'user', tone: 'info',
-      title: 'Employee profile updated',
-      desc: `${this.state.employees[idx].name}'s details were updated by HR.`,
-      time: nowStamp()
-    });
-    return true;
+    return api.put(`/api/employees/${id}`, patch);
   }
 
-  // ---------------------------------------------------------------- ATTENDANCE
-
-  getAllAttendance() {
-    if (!this.attendanceCache) {
-      this.attendanceCache = generateMonthAttendance(CURRENT_MONTH.year, CURRENT_MONTH.month);
-    }
-    return this.attendanceCache;
+  /** POST /api/employees */
+  createEmployee(data) {
+    return api.post('/api/employees', data);
   }
 
-  getAttendanceForDate(dateISO) {
-    return this.getAllAttendance().filter(r => r.date === dateISO);
+  // ------------------------------------------------------------------ ATTENDANCE
+
+  /** GET /api/attendance/admin/today — org summary + per-employee records */
+  getTodayAttendance() {
+    return api.get('/api/attendance/admin/today');
   }
 
-  filterAttendance({ employeeId = '', status = '', date = '' } = {}) {
-    return this.getAllAttendance().filter(r =>
-      (!employeeId || r.employeeId === employeeId) &&
-      (!status || r.status === status) &&
-      (!date || r.date === date)
-    );
+  /** GET /api/attendance/me/monthly for ANY employee (admin-authorized route) */
+  getEmployeeMonthlyAttendance(employeeId, month) {
+    // Admins read another employee's monthly attendance via reports API.
+    const [year, mon] = month.split('-');
+    const from = `${month}-01`;
+    const to = new Date(Number(year), Number(mon), 0).toISOString().slice(0, 10);
+    return this.getReport('attendance', { from, to, format: 'json' });
   }
 
-  getMonthlyAttendance(employeeId, year = CURRENT_MONTH.year, month = CURRENT_MONTH.month) {
-    const prefix = `${year}-` + String(month).padStart(2, '0');
-    return this.getAllAttendance()
-      .filter(r => r.employeeId === employeeId && r.date.startsWith(prefix))
-      .sort((a, b) => (a.date > b.date ? 1 : -1));
+  // ----------------------------------------------------------------------- LEAVE
+
+  /** GET /api/admin/leaves?status=&page=&limit= */
+  async getLeaves({ status = '', page = 1, limit = 50 } = {}) {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+    return api.get(`/api/admin/leaves?${params.toString()}`);
   }
 
-  summarize(records) {
-    const summary = { present: 0, absent: 0, halfDay: 0, leave: 0, totalMinutes: 0, extraMinutes: 0 };
-    for (const r of records) {
-      if (r.status === 'Present') summary.present++;
-      else if (r.status === 'Absent') summary.absent++;
-      else if (r.status === 'Half-day') summary.halfDay++;
-      else if (r.status === 'Leave') summary.leave++;
-      summary.totalMinutes += r.workMinutes || 0;
-      summary.extraMinutes += r.extraMinutes || 0;
-    }
-    return summary;
-  }
-
-  getTodayRecords() {
-    return this.getAllAttendance().filter(r => r.date === TODAY_ISO);
-  }
-
-  // Weekly trend for dashboard mini bar chart (last 7 working days incl. today)
-  getLastSevenWorkingDays() {
-    const all = this.getAllAttendance();
-    const dates = [...new Set(all.map(r => r.date))].sort().slice(-7);
-    return dates.map(date => {
-      const dayRecords = all.filter(r => r.date === date);
-      const s = this.summarize(dayRecords);
-      return {
-        date,
-        label: new Date(date.slice(0, 4), date.slice(5, 7) - 1, date.slice(8, 10))
-          .toLocaleDateString('en-US', { weekday: 'short' }),
-        presentRate: dayRecords.length ? Math.round((s.present / dayRecords.length) * 100) : 0
-      };
-    });
-  }
-
-  // --------------------------------------------------------------------- LEAVE
-
-  getLeaves(statusFilter = '') {
-    const list = this.state.leaveRequests;
-    return statusFilter ? list.filter(l => l.status === statusFilter) : list;
-  }
-
-  getLeaveById(id) {
-    return this.state.leaveRequests.find(l => l.id === id) || null;
-  }
-
-  getEmployeeLeaveStats() {
-    const counts = { Pending: 0, Approved: 0, Rejected: 0 };
-    this.state.leaveRequests.forEach(l => { counts[l.status] = (counts[l.status] || 0) + 1; });
-    return counts;
-  }
-
-  setLeaveDecision(requestId, decision, commentText = '') {
-    const req = this.getLeaveById(requestId);
-    if (!req || req.status !== 'Pending') return null;
-
-    req.status = decision; // 'Approved' | 'Rejected'
-    req.decidedBy = ADMIN_PROFILE.name;
-    req.decidedOn = nowStamp();
-
-    const trimmed = commentText.trim();
-    if (trimmed) {
-      req.comments.push({ author: ADMIN_PROFILE.name, text: trimmed, time: nowStamp() });
-    }
-
-    // Keep attendance story consistent: approved leave marks the employee on leave.
-    if (decision === 'Approved') {
-      const att = this.getAllAttendance();
-      const start = req.startDate <= TODAY_ISO ? req.startDate : null;
-      const end = TODAY_ISO <= req.endDate ? TODAY_ISO : null;
-      if (start && end) {
-        att.filter(r => r.employeeId === req.employeeId && r.date >= start && r.date <= end)
-          .forEach(r => {
-            r.status = 'Leave';
-            r.checkIn = '-';
-            r.checkOut = '-';
-            r.workMinutes = 0;
-            r.hoursLabel = '0h 00m';
-            r.extraMinutes = 0;
-            r.extraLabel = '0h 00m';
-          });
-        this.syncEmployeeStatus(req.employeeId, TODAY_ISO >= req.startDate && TODAY_ISO <= req.endDate);
-      }
-    }
-
-    this.save();
-
-    const emp = this.getEmployeeById(req.employeeId);
-    this.logActivity({
-      icon: decision === 'Approved' ? 'plane' : 'x-circle',
-      tone: decision === 'Approved' ? 'info' : 'danger',
-      title: `Leave ${decision.toLowerCase()}`,
-      desc: `${emp ? emp.name : req.employeeId}'s ${req.type} (${req.startDate} - ${req.endDate}) was ${decision.toLowerCase()} by HR.`,
-      time: nowStamp()
-    });
-    this.addNotification({
-      icon: decision === 'Approved' ? 'check-circle' : 'alert-triangle',
-      tone: decision === 'Approved' ? 'success' : 'danger',
-      title: `Leave ${decision.toLowerCase()}`,
-      desc: `${req.id}: ${emp ? emp.name : req.employeeId} · ${req.type}.`,
-      time: 'Just now'
-    });
-
-    return req;
-  }
-
-  syncEmployeeStatus(employeeId, onLeaveToday) {
-    const emp = this.getEmployeeById(employeeId);
-    if (!emp || emp.employmentStatus === 'Inactive') return;
-    if (onLeaveToday && emp.employmentStatus !== 'On Leave') {
-      emp.employmentStatus = 'On Leave';
-    } else if (!onLeaveToday && emp.employmentStatus === 'On Leave') {
-      emp.employmentStatus = 'Active';
+  /** Pending-count helper used by sidebar badge (cheap single fetch). */
+  async getPendingLeaveCount() {
+    try {
+      const data = await api.get('/api/admin/leaves?status=PENDING&page=1&limit=1');
+      return data.total || 0;
+    } catch (_) {
+      return 0;
     }
   }
 
-  addLeaveComment(requestId, text) {
-    const req = this.getLeaveById(requestId);
-    if (!req || !text.trim()) return null;
-    const comment = { author: ADMIN_PROFILE.name, text: text.trim(), time: nowStamp() };
-    req.comments.push(comment);
-    this.save();
-    return comment;
+  /** POST /api/admin/leaves/:id/approve | reject */
+  decideLeave(requestId, decision, comment = '') {
+    const action = decision === 'APPROVED' || decision === 'Approved' ? 'approve' : 'reject';
+    return api.post(`/api/admin/leaves/${requestId}/${action}`, { comment });
   }
 
-  // ------------------------------------------------------------------- PAYROLL
-  // MOCK SPLIT ONLY. Real statutory calculations (PF, PT, TDS etc.) will come
-  // from the backend; the ratios below exist purely to demo the UI and mirror
-  // the employee portal's ₹50,000 sample payslip.
+  // --------------------------------------------------------------------- PAYROLL
 
-  computePayslip(wage, payableDays = CURRENT_MONTH.workingDays) {
-    const w = Number(wage) || 0;
-    const basicSalary = Math.round(w * 0.5);
-    const hra = Math.round(w * 0.25);
-    const standardAllowance = Math.round(w * 0.08334);
-    const performanceBonus = Math.round(w * 0.04165 * 10) / 10;
-    const lta = Math.round(w * 0.04165 * 10) / 10;
-    const fixedAllowance = Math.max(0, Math.round(w - (basicSalary + hra + standardAllowance + performanceBonus + lta)));
-    const employeePF = Math.round(basicSalary * 0.12);
-    const employerPF = employeePF;
-    const professionalTax = 200;
-    const totalDeductions = employeePF + professionalTax; // employer PF is an employer cost, never deducted
-    return {
-      currency: '₹',
-      month: CURRENT_MONTH.label,
-      payPeriod: 'Aug 01, 2026 - Aug 31, 2026',
-      payableDays,
-      grossWage: w,
-      basicSalary,
-      hra,
-      standardAllowance,
-      performanceBonus,
-      lta,
-      fixedAllowance,
-      employeePF,
-      employerPF,
-      professionalTax,
-      totalDeductions,
-      netPay: w - totalDeductions,
-      nextPayoutDate: NEXT_PAYOUT_DATE
-    };
-  }
-
-  getPayslip(employeeId) {
-    const emp = this.getEmployeeById(employeeId);
-    if (!emp) return null;
-    const override = this.state.payrollOverrides[employeeId] || {};
-    const wage = override.wage ?? emp.wage;
-    const payableDays = override.payableDays ?? emp.payableDays ?? CURRENT_MONTH.workingDays;
-    return { employee: emp, slip: this.computePayslip(wage, payableDays) };
-  }
-
-  saveWage(employeeId, wage) {
-    const value = Number(wage);
-    if (!value || value <= 0) return false;
-    this.state.payrollOverrides[employeeId] = {
-      ...(this.state.payrollOverrides[employeeId] || {}),
-      wage: value
-    };
-    this.save();
-    const emp = this.getEmployeeById(employeeId);
-    this.logActivity({
-      icon: 'receipt', tone: 'neutral',
-      title: 'Salary updated (mock)',
-      desc: `Monthly wage for ${emp.name} set to ₹${value.toLocaleString('en-IN')}. Backend will compute final figures.`,
-      time: nowStamp()
-    });
-    return true;
-  }
-
+  /** GET /api/admin/payroll — all payslips + totals */
   getPayrollOverview() {
-    const slips = this.state.employees
-      .filter(e => e.employmentStatus !== 'Inactive')
-      .map(e => this.getPayslip(e.id).slip);
-    const sum = key => slips.reduce((acc, s) => acc + s[key], 0);
-    return {
-      headcount: slips.length,
-      grossTotal: sum('grossWage'),
-      deductionsTotal: sum('totalDeductions'),
-      netTotal: sum('netPay'),
-      nextPayoutDate: NEXT_PAYOUT_DATE,
-      month: CURRENT_MONTH.label
-    };
+    return api.get('/api/admin/payroll');
   }
 
-  // ------------------------------------------------------- DASHBOARD & FEEDS
+  /** GET /api/admin/payroll/:employeeId — structure + components + payslips */
+  getEmployeePayroll(employeeId) {
+    return api.get(`/api/admin/payroll/${employeeId}`);
+  }
 
+  /** POST /api/admin/payroll/:employeeId — create/update salary structure */
+  saveWage(employeeId, monthlyWage) {
+    return api.post(`/api/admin/payroll/${employeeId}`, { monthlyWage: Number(monthlyWage) });
+  }
+
+  /** PUT /api/admin/payroll/:employeeId */
+  updateWage(employeeId, monthlyWage) {
+    return api.put(`/api/admin/payroll/${employeeId}`, { monthlyWage: Number(monthlyWage) });
+  }
+
+  /** POST /api/admin/payroll/:employeeId/generate-payslip { month: 'YYYY-MM' } */
+  generatePayslip(employeeId, month) {
+    return api.post(`/api/admin/payroll/${employeeId}/generate-payslip`, { month });
+  }
+
+  // -------------------------------------------------------------------- REPORTS
+
+  /**
+   * GET /api/admin/reports/:type?type=attendance|leaves|payroll|employees
+   * Returns JSON object or raw CSV string depending on `format`.
+   */
+  getReport(type, { from, to, department = '', status = '', format = 'json' } = {}) {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    if (department) params.set('department', department);
+    if (status) params.set('status', status);
+    params.set('format', format);
+    return api.get(`/api/admin/reports/${type}?${params.toString()}`);
+  }
+
+  /** Download CSV by navigating the browser to the endpoint (auth via token header is required,
+      so we fetch as blob and trigger a download instead). */
+  async downloadReportCsv(type, filters) {
+    const csv = await this.getReport(type, { ...filters, format: 'csv' });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `dayflow-${type}-report-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // -------------------------------------------------------------------- DASHBOARD
+
+  /** GET /api/admin/dashboard */
   getDashboardStats() {
-    const today = this.summarize(this.getTodayRecords());
-    const employees = this.state.employees;
-    return {
-      totalEmployees: employees.length,
-      present: today.present,
-      onLeave: today.leave,
-      absent: today.absent,
-      halfDay: today.halfDay,
-      pendingLeaves: this.getEmployeeLeaveStats().Pending,
-      payrollOverview: this.getPayrollOverview()
-    };
-  }
-
-  logActivity(entry) {
-    this.state.activity.unshift({ id: nextLocalId('ACT'), ...entry });
-    this.state.activity = this.state.activity.slice(0, 30); // cap feed size
-    this.save();
-  }
-
-  getActivity(limit = 8) {
-    return this.state.activity.slice(0, limit);
-  }
-
-  addNotification(entry) {
-    this.state.notifications.unshift({ id: nextLocalId('NTF'), read: false, ...entry });
-    this.state.notifications = this.state.notifications.slice(0, 20);
-    this.save();
-  }
-
-  getNotifications() {
-    return this.state.notifications;
-  }
-
-  markAllNotificationsRead() {
-    this.state.notifications.forEach(n => { n.read = true; });
-    this.save();
-  }
-
-  unreadNotificationCount() {
-    return this.state.notifications.filter(n => !n.read).length;
+    return api.get('/api/admin/dashboard');
   }
 
   // -------------------------------------------------------------------- UTILS
 
   avatarStyle(index) {
-    const [bg, fg] = AVATAR_PALETTE[index % AVATAR_PALETTE.length];
+    const [bg, fg] = AVATAR_PALETTE[Math.abs(index || 0) % AVATAR_PALETTE.length];
     return `background-color:${bg};color:${fg};`;
   }
 }
 
-export const adminStore = new AdminStore();
-
-// Simulated network latency helper for loading skeletons.
-export function simulateFetch(ms = 450) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+export const adminStore = new AdminService();
 
 export function formatINR(amount) {
-  return `₹${Number(amount || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+  const n = Number(amount);
+  if (!Number.isFinite(n)) return '₹0';
+  const hasPaise = Math.round(n * 100) % 100 !== 0;
+  return '₹' + n.toLocaleString('en-IN', hasPaise
+    ? { minimumFractionDigits: 2, maximumFractionDigits: 2 }
+    : { maximumFractionDigits: 0 });
+}
+
+export function formatHoursLabel(decimalHours) {
+  const total = Math.round(Number(decimalHours || 0) * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${h}h ${String(m).padStart(2, '0')}m`;
+}
+
+/** Map a backend employee record onto the shape used by shared UI components. */
+export function uiEmployee(emp) {
+  if (!emp) return null;
+  return {
+    id: emp.id,
+    userId: emp.userId,
+    loginId: emp.loginId || '',
+    name: `${emp.firstName} ${emp.lastName}`.trim(),
+    position: emp.designation || emp.department || 'Staff',
+    department: emp.department || 'General',
+    email: emp.email,
+    phone: emp.phone,
+    joiningDate: emp.joiningDate,
+    employmentStatus: emp.user?.status || 'ACTIVE',
+    role: emp.user?.role,
+    raw: emp,
+  };
+}
+
+export function todayISO() {
+  const d = new Date();
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export function currentMonthKey() {
+  return todayISO().slice(0, 7);
 }

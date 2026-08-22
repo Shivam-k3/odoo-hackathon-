@@ -1,5 +1,8 @@
 // DAYFLOW HRMS — STATUS BADGE COMPONENT (ADMIN)
 // Wireframe mapping: GREEN = Present · AIRPLANE = Approved Leave · YELLOW = Absent
+// Accepts both legacy labels and backend enums (PRESENT / HALF_DAY / PENDING …).
+
+import { esc } from '../../core/api.js';
 
 const BADGE_MAP = {
   // Green family
@@ -25,12 +28,12 @@ const BADGE_MAP = {
 };
 
 export function StatusBadge(status) {
-  const key = String(status || '').toLowerCase();
-  const conf = BADGE_MAP[key] || { cls: 'badge-info', icon: null };
+  const raw = String(status || '').replace(/_/g, '-').toLowerCase();
+  const conf = BADGE_MAP[raw] || { cls: 'badge-info', icon: null };
   return `
     <span class="badge ${conf.cls}">
       ${conf.icon ? `<i data-lucide="${conf.icon}" style="width: 12px; height: 12px;"></i>` : ''}
-      <span>${status}</span>
+      <span>${esc(String(status || '').replace(/_/g, '-'))}</span>
     </span>
   `;
 }

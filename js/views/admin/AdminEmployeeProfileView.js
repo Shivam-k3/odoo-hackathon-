@@ -1,133 +1,109 @@
 // DAYFLOW HRMS — ADMIN EMPLOYEE PROFILE VIEW (/admin/employees/:id)
+// All data from GET /api/employees/:id + GET /api/admin/payroll/:id.
+// Mutations go through PUT /api/employees/:id and admin payroll endpoints.
 
-import { adminStore, simulateFetch, formatINR } from '../../core/adminStore.js';
-import { router } from '../../core/router.js';
+import { adminStore, formatINR } from '../../core/adminStore.js';
+import { esc } from '../../core/api.js';
 import { renderAdminLayout, initAdminLayoutEvents, rerenderPageContent } from '../../components/admin/AdminLayout.js';
 import { StatusBadge } from '../../components/admin/StatusBadge.js';
-import { EmptyState } from '../../components/admin/EmptyState.js';
-import { DepartmentOptions } from '../../components/admin/AttendanceFilters.js';
 import { openModal, closeModal } from '../../components/Modal.js';
 import { showToast } from '../../components/Toast.js';
 
-const TABS = [
-  { id: 'personal', label: 'Personal Information', icon: 'user' },
-  { id: 'job', label: 'Job Information', icon: 'briefcase' },
-  { id: 'documents', label: 'Resume & Skills', icon: 'file-text' },
-  { id: 'salary', label: 'Salary Information', icon: 'wallet' },
-  { id: 'bank', label: 'Bank Information', icon: 'landmark' }
-];
+const CERT_SEPARATOR = ' :: ';
+const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+function parseCert(str) {
+  const [name = '', issuer = '', year = ''] = String(str).split(CERT_SEPARATOR).map(s => s.trim());
+  return { name, issuer, year };
+}
+
+function detailItem(label, valueHtml) {
+  return `
+    <div>
+      <div class="info-item-label">${esc(label)}</div>
+      <div class="info-item-value">${valueHtml ?? '<span style="color:var(--text-tertiary);">—</span>'}</div>
+    </div>
+  `;
+}
+
+function DashboardSectionShell({ title, icon, editId, editLabel, bodyHtml }) {
+  return `
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title"><i data-lucide="${icon}" style="width:18px;height:18px;color:var(--primary);"></i><span>${title}</span></h3>
+        ${editId ? `<button class="btn btn-secondary btn-sm" id="${editId}"><i data-lucide="edit-3" style="width:14px;height:14px;"></i> ${editLabel}</button>` : ''}
+      </div>
+      ${bodyHtml}
+    </div>
+  `;
+}
 
 export function createAdminEmployeeProfileView(params = {}) {
   const ui = {
+    empId: params.id || '',
     loaded: false,
-    empId: params.id || null,
-    tab: 'personal'
+    error: null,
+    tab: 'personal',
+    employee: null,   // backend record
+    payroll: null,    // {salaryStructure, components, payslips}
+    payrollError: null,
   };
-
-  const detailItem = (label, value) => `
-    <div class="detail-row">
-      <div class="info-item-label">${label}</div>
-      <div class="info-item-value">${value ?? '-'}</div>
-    </div>
-  `;
-
-  function skeletonHtml() {
-    return `
-      <div class="skeleton" style="height:150px; border-radius:16px; margin-bottom:20px;"></div>
-      <div class="skeleton" style="height:44px; margin-bottom:20px;"></div>
-      <div class="skeleton" style="height:320px; border-radius:16px;"></div>
-    `;
-  }
 
   // ------------------------------------------------------------- TAB CONTENTS
 
   function personalTabHtml(emp) {
-    return `
-      ${DashboardSectionShell({
-        title: 'Personal Details',
-        icon: 'user',
-        editId: 'edit-personal-btn',
-        editLabel: 'Edit Personal Info',
-        bodyHtml: `
-          <div class="detail-grid">
-            ${detailItem('Full Name', emp.name)}
-            ${detailItem('Date of Birth', emp.dob)}
-            ${detailItem('Gender', emp.gender)}
-            ${detailItem('Phone', emp.phone)}
-            ${detailItem('Emergency Contact', emp.emergencyContact)}
-            ${detailItem('Address', emp.address)}
-          </div>
-          <div style="margin-top:18px;">
-            <div class="info-item-label">About</div>
-            <p style="font-size:14px; color:var(--text-main); line-height:1.6; margin-top:6px;">${emp.about}</p>
-          </div>
-        `
-      })}
-    `;
+    return DashboardSectionShell({
+      title: 'Personal Details', icon: 'user',
+      editId: 'edit-personal-btn', editLabel: 'Edit Personal Info',
+      bodyHtml: `
+        <div class="detail-grid">
+          ${detailItem('Full Name', esc(`${emp.firstName} ${emp.lastName}`.trim()))}
+          ${detailItem('Date of Birth', emp.dob ? esc(String(emp.dob).slice(0, 10)) : '')}
+          ${detailItem('Gender', emp.gender)}
+          ${detailItem('Phone', emp.phone)}
+          ${detailItem('Address', emp.address)}
+        </div>
+        <div style="margin-top:18px;">
+          <div class="info-item-label">About</div>
+          <p style="font-size:14px; color:var(--text-main); line-height:1.6; margin-top:6px;">${emp.about ? esc(emp.about) : '<span style="color:var(--text-tertiary);">Not provided.</span>'}</p>
+        </div>
+      `,
+    });
   }
 
   function jobTabHtml(emp) {
-    return `
-      ${DashboardSectionShell({
-        title: 'Job Details',
-        icon: 'briefcase',
-        editId: 'edit-job-btn',
-        editLabel: 'Edit Job Info',
-        bodyHtml: `
-          <div class="detail-grid">
-            ${detailItem('Employee ID', `<span class="badge badge-info">${emp.id}</span>`)}
-            ${detailItem('Department', emp.department)}
-            ${detailItem('Job Position', emp.position)}
-            ${detailItem('Employment Type', emp.employmentType)}
-            ${detailItem('Reporting Manager', emp.manager)}
-            ${detailItem('Work Location', emp.location)}
-            ${detailItem('Shift', emp.shift)}
-            ${detailItem('Joining Date', emp.joiningDate)}
-            ${detailItem('Employment Status', StatusBadge(emp.employmentStatus))}
-          </div>
-        `
-      })}
-    `;
+    return DashboardSectionShell({
+      title: 'Job Details', icon: 'briefcase',
+      editId: 'edit-job-btn', editLabel: 'Edit Job Info',
+      bodyHtml: `
+        <div class="detail-grid">
+          ${detailItem('Employee ID', `<span class="badge badge-info">${esc(emp.loginId)}</span>`)}
+          ${detailItem('Department', emp.department)}
+          ${detailItem('Job Position', emp.designation)}
+          ${detailItem('Joining Date', emp.joiningDate ? esc(String(emp.joiningDate).slice(0, 10)) : '')}
+          ${detailItem('Account Status', StatusBadge(emp.user?.status))}
+          ${detailItem('Role', `<span class="badge badge-info">${esc(emp.user?.role || 'EMPLOYEE')}</span>`)}
+        </div>
+      `,
+    });
   }
 
   function documentsTabHtml(emp) {
+    const certs = (emp.certifications || []).map(parseCert);
     return `
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:24px;">
-        <!-- Resume card -->
+        <!-- Certifications -->
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title"><i data-lucide="file-text" style="width:18px;height:18px;color:var(--primary);"></i><span>Resume</span></h3>
-          </div>
-          <div style="display:flex; align-items:center; gap:14px; padding:14px; border:1px dashed var(--border-color); border-radius:var(--radius-md);">
-            <div class="stat-card-icon" style="background-color:var(--danger-bg); color:var(--danger); width:42px; height:42px;">
-              <i data-lucide="file-badge" style="width:20px;height:20px;"></i>
-            </div>
-            <div style="flex:1; min-width:0;">
-              <div class="cell-strong" style="font-size:14px; word-break:break-all;">${emp.resume.name}</div>
-              <div style="font-size:12px; color:var(--text-tertiary);">${emp.resume.size} · Updated ${emp.resume.updatedOn}</div>
-            </div>
-          </div>
-          <div style="display:flex; gap:10px; margin-top:14px;">
-            <button class="btn btn-secondary btn-sm" id="resume-download-btn">
-              <i data-lucide="download" style="width:14px;height:14px;"></i> <span>Download</span>
-            </button>
-            <button class="btn btn-secondary btn-sm" id="resume-replace-btn">
-              <i data-lucide="upload" style="width:14px;height:14px;"></i> <span>Replace</span>
-            </button>
-            <input type="file" id="resume-file-input" style="display:none;" />
-          </div>
-
-          <!-- Certifications -->
-          <div class="card-header" style="margin-top:26px;">
             <h3 class="card-title"><i data-lucide="badge-check" style="width:18px;height:18px;color:var(--success);"></i><span>Certifications</span></h3>
             <button class="btn btn-secondary btn-xs" id="add-cert-btn"><i data-lucide="plus" style="width:13px;height:13px;"></i> Add</button>
           </div>
           <div id="cert-list" style="display:flex; flex-direction:column; gap:10px;">
-            ${(emp.certifications || []).map((c, idx) => `
+            ${certs.map((c, idx) => `
               <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; background-color:var(--bg-page); border-radius:var(--radius-md);">
                 <div>
-                  <div style="font-weight:600; font-size:13px;">${c.name}</div>
-                  <div style="font-size:12px; color:var(--text-secondary);">${c.issuer} · ${c.year}</div>
+                  <div style="font-weight:600; font-size:13px;">${esc(c.name)}</div>
+                  <div style="font-size:12px; color:var(--text-secondary);">${c.issuer ? esc(c.issuer) : ''}${c.year ? ` · ${esc(c.year)}` : ''}</div>
                 </div>
                 <button class="icon-btn" data-remove-cert="${idx}" title="Remove certification" style="width:30px;height:30px;">
                   <i data-lucide="trash-2" style="width:15px;height:15px;color:var(--danger);"></i>
@@ -137,7 +113,7 @@ export function createAdminEmployeeProfileView(params = {}) {
           </div>
         </div>
 
-        <!-- Skills card -->
+        <!-- Skills -->
         <div class="card">
           <div class="card-header">
             <h3 class="card-title"><i data-lucide="sparkles" style="width:18px;height:18px;color:#b06000;"></i><span>Skills</span></h3>
@@ -146,219 +122,279 @@ export function createAdminEmployeeProfileView(params = {}) {
           <div class="skills-container" style="margin-top:0;">
             ${(emp.skills || []).map((s, idx) => `
               <span class="skill-tag">
-                ${s}
+                ${esc(s)}
                 <button class="remove-skill-btn" data-remove-skill="${idx}" title="Remove skill">
                   <i data-lucide="x" style="width:13px; height:13px;"></i>
                 </button>
-              </span>
-            `).join('') || '<span style="font-size:13px;color:var(--text-tertiary);">No skills added yet.</span>'}
+              </span>`).join('') || '<p style="font-size:13px; color:var(--text-tertiary);">No skills listed.</p>'}
           </div>
-          <form id="add-skill-form" style="display:flex; gap:8px; margin-top:18px;">
-            <input type="text" id="new-skill-input" class="form-input" placeholder="e.g. React, SQL..." autocomplete="off" />
-            <button type="submit" class="btn btn-primary btn-sm"><i data-lucide="plus" style="width:14px;height:14px;"></i> Add</button>
-          </form>
-        </div>
-      </div>
-    `;
-  }
-
-  function salaryTabHtml(emp) {
-    const payslip = adminStore.getPayslip(emp.id);
-    const s = payslip.slip;
-    return `
-      <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:24px;">
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title"><i data-lucide="wallet" style="width:18px;height:18px;color:var(--primary);"></i><span>Salary Structure (mock preview)</span></h3>
-            <button class="btn btn-primary btn-sm" id="profile-edit-salary-btn">
-              <i data-lucide="pencil" style="width:14px;height:14px;"></i> Edit Salary
-            </button>
-          </div>
-
-          <div class="salary-line earning"><span class="salary-label">Monthly Wage (CTC)</span><span class="salary-amount">${formatINR(s.grossWage)}</span></div>
-          <div class="salary-line earning"><span class="salary-label">Basic Salary</span><span class="salary-amount">${formatINR(s.basicSalary)}</span></div>
-          <div class="salary-line earning"><span class="salary-label">HRA</span><span class="salary-amount">${formatINR(s.hra)}</span></div>
-          <div class="salary-line earning"><span class="salary-label">Standard Allowance</span><span class="salary-amount">${formatINR(s.standardAllowance)}</span></div>
-          <div class="salary-line earning"><span class="salary-label">Performance Bonus</span><span class="salary-amount">${formatINR(s.performanceBonus)}</span></div>
-          <div class="salary-line earning"><span class="salary-label">Leave Travel Allowance</span><span class="salary-amount">${formatINR(s.lta)}</span></div>
-          <div class="salary-line earning"><span class="salary-label">Fixed Allowance</span><span class="salary-amount">${formatINR(s.fixedAllowance)}</span></div>
-
-          <div style="margin-top:16px; padding-top:6px;">
-            <div style="font-size:12px; font-weight:600; text-transform:uppercase; letter-spacing:0.4px; color:var(--text-tertiary); margin-bottom:4px;">Deductions & Contributions</div>
-            <div class="salary-line deduction"><span class="salary-label">Employee PF</span><span class="salary-amount">-${formatINR(s.employeePF)}</span></div>
-            <div class="salary-line"><span class="salary-label">Employer PF <em style="font-style:normal; font-size:11px; color:var(--text-tertiary);">(employer cost)</em></span><span class="salary-amount">${formatINR(s.employerPF)}</span></div>
-            <div class="salary-line deduction"><span class="salary-label">Professional Tax</span><span class="salary-amount">-${formatINR(s.professionalTax)}</span></div>
-          </div>
-
-          <div class="salary-total">
-            <span>Net Pay · Payable days: ${s.payableDays}</span>
-            <span style="color:var(--success);">${formatINR(s.netPay)}</span>
-          </div>
-          <p style="font-size:12px; color:var(--text-tertiary); margin-top:12px;">
-            <i data-lucide="info" style="width:13px;height:13px; vertical-align:-2px;"></i>
-            Mock values only — the backend will compute real statutory figures.
-          </p>
-        </div>
-
-        <div class="card" style="align-self:start;">
-          <div class="card-header">
-            <h3 class="card-title"><i data-lucide="receipt" style="width:18px;height:18px;color:var(--primary);"></i><span>Payslip Summary</span></h3>
-            <span class="badge badge-success">${s.month}</span>
-          </div>
-          <div class="stat-value" style="color:var(--success);">${formatINR(s.netPay)}</div>
-          <div style="font-size:13px; color:var(--text-secondary);">Estimated net take-home for ${s.payPeriod}</div>
-          <div style="display:flex; flex-direction:column; gap:10px; margin-top:18px;">
-            <div class="progress-row">
-              <div class="progress-row-head"><span>Gross vs Net retention</span><span>${Math.round((s.netPay / s.grossWage) * 100)}%</span></div>
-              <div class="progress-track"><div class="progress-fill" style="width:${Math.round((s.netPay / s.grossWage) * 100)}%; background-color:var(--success);"></div></div>
-            </div>
-          </div>
-          <button class="btn btn-secondary btn-block btn-sm" id="goto-payroll-btn" style="margin-top:16px;">
-            <span>Open Full Payroll Console</span>
-            <i data-lucide="arrow-right" style="width:14px;height:14px;"></i>
+          <button class="btn btn-secondary btn-sm" id="add-skill-btn" style="margin-top:16px;">
+            <i data-lucide="plus" style="width:13px;height:13px;"></i> Add Skill
           </button>
         </div>
       </div>
     `;
   }
 
-  function bankTabHtml(emp) {
-    const b = emp.bank;
-    return `
-      ${DashboardSectionShell({
-        title: 'Bank & Statutory Details',
-        icon: 'landmark',
-        editId: 'edit-bank-btn',
-        editLabel: 'Edit Bank Info',
+  function salaryTabHtml(payroll) {
+    if (ui.payrollError || !payroll || !payroll.salaryStructure) {
+      return DashboardSectionShell({
+        title: 'Salary & Payroll', icon: 'wallet',
         bodyHtml: `
-          <div class="detail-grid">
-            ${detailItem('Bank Name', b.bankName)}
-            ${detailItem('Account Number', b.accountNumber)}
-            ${detailItem('IFSC Code', b.ifsc)}
-            ${detailItem('Branch', b.branch)}
-            ${detailItem('PAN', b.pan)}
-            ${detailItem('UAN (PF)', b.uan)}
+          <div style="padding:20px; text-align:center;">
+            <p style="font-size:13px; color:var(--text-tertiary);">
+              ${ui.payrollError ? esc(ui.payrollError) : 'No salary structure configured for this employee yet.'}
+            </p>
+            <button class="btn btn-primary btn-sm" id="set-wage-btn" style="margin-top:12px;">
+              <i data-lucide="wallet" style="width:14px;height:14px;"></i> Set Monthly Wage
+            </button>
           </div>
-          <p style="font-size:12px; color:var(--text-tertiary); margin-top:16px;">
-            <i data-lucide="lock" style="width:13px;height:13px; vertical-align:-2px;"></i>
-            Account numbers are masked in the UI. Full details are only accessible to authorised payroll roles.
-          </p>
-        `
-      })}
-    `;
-  }
-
-  function DashboardSectionShell({ title, icon, editId, editLabel, bodyHtml }) {
-    return `
-      <div class="card">
-        <div class="card-header">
-          <h3 class="card-title"><i data-lucide="${icon}" style="width:18px;height:18px;color:var(--primary);"></i><span>${title}</span></h3>
-          <button class="btn btn-secondary btn-sm" id="${editId}"><i data-lucide="pencil" style="width:14px;height:14px;"></i> ${editLabel}</button>
-        </div>
-        ${bodyHtml}
-      </div>
-    `;
-  }
-
-  // ------------------------------------------------------------------- RENDER
-
-  function contentHtml() {
-    const emp = adminStore.getEmployeeById(ui.empId);
-    if (!emp) {
-      return EmptyState({
-        variant: 'error',
-        icon: 'alert-triangle',
-        title: 'Employee not found',
-        desc: `No employee exists with ID "${ui.empId}". The record may have been removed.`,
-        actionsHtml: '<a href="#/admin/employees" class="btn btn-primary btn-sm">Back to Employee List</a>'
+        `,
       });
     }
 
-    const initials = emp.name.split(' ').map(w => w[0]).slice(0, 2).join('');
-    const tabBody = {
-      personal: () => personalTabHtml(emp),
-      job: () => jobTabHtml(emp),
-      documents: () => documentsTabHtml(emp),
-      salary: () => salaryTabHtml(emp),
-      bank: () => bankTabHtml(emp)
-    }[ui.tab]();
+    const comps = payroll.components || {};
+    const struct = payroll.salaryStructure;
 
-    return `
-      <a href="#/admin/employees" style="display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500; margin-bottom:16px;">
-        <i data-lucide="arrow-left" style="width:15px;height:15px;"></i> Back to Employees
-      </a>
-
-      <!-- Hero header -->
-      <div class="card profile-hero">
-        <div class="av-circle av-lg" style="${adminStore.avatarStyle(Number(emp.id.slice(-2)) || 0)}">${initials}</div>
-        <div class="profile-hero-info">
-          <div class="profile-hero-name">
-            ${emp.name}
-            <span class="badge badge-info">${emp.id}</span>
-            ${StatusBadge(emp.employmentStatus)}
+    return DashboardSectionShell({
+      title: 'Salary & Payroll', icon: 'wallet',
+      editId: 'edit-salary-btn', editLabel: 'Update Wage',
+      bodyHtml: `
+        <div class="stats-grid" style="margin-bottom:18px;">
+          <div class="stat-card">
+            <div>
+              <div class="stat-card-label">Monthly Wage</div>
+              <div class="stat-card-value">${formatINR(struct.monthlyWage)}</div>
+              <div class="stat-card-sub">Effective ${esc(String(struct.effectiveFrom).slice(0, 10))}</div>
+            </div>
+            <div class="stat-card-icon" style="background-color:var(--primary-light);color:var(--primary);">
+              <i data-lucide="wallet" style="width:20px;height:20px;"></i>
+            </div>
           </div>
-          <div class="profile-hero-sub">${emp.position} · ${emp.department}</div>
-          <div class="profile-hero-contact">
-            <span><i data-lucide="mail" style="width:14px;height:14px;"></i> ${emp.email}</span>
-            <span><i data-lucide="phone" style="width:14px;height:14px;"></i> ${emp.phone}</span>
-            <span><i data-lucide="calendar" style="width:14px;height:14px;"></i> Joined ${emp.joiningDate}</span>
+          <div class="stat-card">
+            <div>
+              <div class="stat-card-label">Net Take-Home</div>
+              <div class="stat-card-value" style="color:var(--success);">${formatINR(comps.netPay)}</div>
+              <div class="stat-card-sub">After PF + Professional Tax</div>
+            </div>
+            <div class="stat-card-icon" style="background-color:var(--success-bg);color:var(--success);">
+              <i data-lucide="banknote" style="width:20px;height:20px;"></i>
+            </div>
           </div>
         </div>
+
+        <h4 style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-tertiary); margin-bottom:10px;">Component Breakdown (backend-computed)</h4>
+        <div class="table-container">
+          <table class="data-table">
+            <tbody>
+              <tr><td>Basic Salary</td><td style="text-align:right;">${formatINR(comps.basicSalary)}</td></tr>
+              <tr><td>HRA</td><td style="text-align:right;">${formatINR(comps.hra)}</td></tr>
+              <tr><td>Standard Allowance</td><td style="text-align:right;">${formatINR(comps.standardAllowance)}</td></tr>
+              <tr><td>Performance Bonus</td><td style="text-align:right;">${formatINR(comps.performanceBonus)}</td></tr>
+              <tr><td>LTA</td><td style="text-align:right;">${formatINR(comps.lta)}</td></tr>
+              <tr><td>Fixed Allowance</td><td style="text-align:right;">${formatINR(comps.fixedAllowance)}</td></tr>
+              <tr><td><strong>Gross Earnings</strong></td><td style="text-align:right;"><strong>${formatINR(comps.grossEarnings)}</strong></td></tr>
+              <tr><td>Employee PF (deducted)</td><td style="text-align:right; color:var(--danger);">-${formatINR(comps.employeePf)}</td></tr>
+              <tr><td>Professional Tax (deducted)</td><td style="text-align:right; color:var(--danger);">-${formatINR(comps.professionalTax)}</td></tr>
+              <tr><td>Employer PF (employer cost)</td><td style="text-align:right; color:var(--text-tertiary);">${formatINR(comps.employerPf)}</td></tr>
+              <tr><td><strong style="color:var(--primary);">Monthly Net Pay</strong></td><td style="text-align:right;"><strong style="color:var(--primary);">${formatINR(comps.netPay)}</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Payslip generation + history -->
+        <div class="card-header" style="margin-top:24px;">
+          <h3 class="card-title"><i data-lucide="file-text" style="width:18px;height:18px;color:var(--primary);"></i><span>Payslips</span></h3>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="month" id="generate-payslip-month" class="form-input" style="width:auto; padding:4px 10px;" />
+            <button class="btn btn-primary btn-xs" id="generate-payslip-btn"><i data-lucide="zap" style="width:12px;height:12px;"></i> Generate</button>
+          </div>
+        </div>
+        <div class="table-container" style="margin-top:10px;">
+          <table class="data-table">
+            <thead><tr><th>Period</th><th>Working Days</th><th>Payable Days</th><th>Gross</th><th>Net Pay</th></tr></thead>
+            <tbody>
+              ${(payroll.payslips || []).map(p => `
+                <tr>
+                  <td style="font-weight:600;">${MONTH_NAMES[(p.periodMonth || 1) - 1]} ${p.periodYear}</td>
+                  <td>${p.workingDays ?? '—'}</td>
+                  <td>${p.payableDays ?? '—'}</td>
+                  <td>${formatINR(p.grossEarnings)}</td>
+                  <td style="color:var(--success); font-weight:700;">${formatINR(p.netPay)}</td>
+                </tr>`).join('') || '<tr><td colspan="5" style="text-align:center; padding:20px; color:var(--text-tertiary);">No payslips generated.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `,
+    });
+  }
+
+  function accountTabHtml(emp) {
+    return DashboardSectionShell({
+      title: 'Account & Access', icon: 'shield',
+      bodyHtml: `
+        <div class="detail-grid">
+          ${detailItem('Login Email', emp.email)}
+          ${detailItem('Role', `<span class="badge badge-info">${esc(emp.user?.role || 'EMPLOYEE')}</span>`)}
+          ${detailItem('Status', StatusBadge(emp.user?.status))}
+          ${detailItem('User ID', `<code style="font-size:11px;">${esc(emp.userId || '')}</code>`)}
+        </div>
+        <div style="display:flex; gap:10px; margin-top:20px;">
+          <select id="acct-role" class="form-select" style="max-width:220px;">
+            <option value="EMPLOYEE" ${emp.user?.role === 'EMPLOYEE' ? 'selected' : ''}>EMPLOYEE</option>
+            <option value="ADMIN_HR" ${emp.user?.role === 'ADMIN_HR' ? 'selected' : ''}>ADMIN_HR</option>
+          </select>
+          <select id="acct-status" class="form-select" style="max-width:220px;">
+            <option value="ACTIVE" ${emp.user?.status === 'ACTIVE' ? 'selected' : ''}>ACTIVE</option>
+            <option value="PENDING" ${emp.user?.status === 'PENDING' ? 'selected' : ''}>PENDING</option>
+            <option value="INACTIVE" ${emp.user?.status === 'INACTIVE' ? 'selected' : ''}>INACTIVE</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="acct-save-btn">Save Access Changes</button>
+        </div>
+      `,
+    });
+  }
+
+  // ------------------------------------------------------------------ SHELL
+
+  function contentHtml() {
+    const emp = ui.employee;
+    const fullName = `${emp.firstName} ${emp.lastName}`.trim();
+    const initials = fullName.split(' ').map(w => w[0]).slice(0, 2).join('');
+
+    const tabs = [
+      { id: 'personal', label: 'Personal', icon: 'user' },
+      { id: 'job', label: 'Job', icon: 'briefcase' },
+      { id: 'documents', label: 'Documents', icon: 'file-badge' },
+      { id: 'salary', label: 'Salary', icon: 'wallet' },
+      { id: 'account', label: 'Account', icon: 'shield' },
+    ];
+
+    let tabHtml = '';
+    if (ui.tab === 'personal') tabHtml = personalTabHtml(emp);
+    else if (ui.tab === 'job') tabHtml = jobTabHtml(emp);
+    else if (ui.tab === 'documents') tabHtml = documentsTabHtml(emp);
+    else if (ui.tab === 'salary') tabHtml = salaryTabHtml(ui.payroll);
+    else if (ui.tab === 'account') tabHtml = accountTabHtml(emp);
+
+    return `
+      <!-- Profile header -->
+      <div class="card profile-header-card">
+        <div class="av-circle av-lg" style="${adminStore.avatarStyle(fullName.length)}">${esc(initials)}</div>
+        <div style="flex:1;">
+          <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+            <h2 style="font-size:21px; font-weight:700;">${esc(fullName)}</h2>
+            <span class="badge badge-info">${esc(emp.loginId)}</span>
+            ${StatusBadge(emp.user?.status)}
+          </div>
+          <p style="color:var(--text-secondary); font-size:13px; margin-top:2px;">${esc(emp.designation || 'Staff')} · ${esc(emp.department || 'General')} · ${esc(emp.email)}</p>
+        </div>
+        <a href="#/admin/employees" class="btn btn-secondary btn-sm"><i data-lucide="arrow-left" style="width:14px;height:14px;"></i> Back</a>
       </div>
 
-      <!-- Tabs -->
-      <div class="tab-container">
-        ${TABS.map(t => `
+      <div class="tab-container" id="profile-tabs">
+        ${tabs.map(t => `
           <button class="tab-btn ${ui.tab === t.id ? 'active' : ''}" data-tab="${t.id}">
-            <i data-lucide="${t.icon}" style="width:15px;height:15px; vertical-align:-2px; margin-right:6px;"></i>${t.label}
-          </button>
-        `).join('')}
+            <i data-lucide="${t.icon}" style="width:15px;height:15px; vertical-align:-2px; margin-right:4px;"></i>${t.label}
+          </button>`).join('')}
       </div>
 
-      <div id="profile-tab-body">${tabBody}</div>
+      <div id="profile-tab-content">${tabHtml}</div>
     `;
   }
 
-  // ------------------------------------------------------------------- MODALS
+  function errorHtml() {
+    return `
+      <div style="padding:40px; text-align:center;">
+        <i data-lucide="alert-triangle" style="width:36px; height:36px; color:var(--danger);"></i>
+        <div style="font-weight:600; margin-top:12px;">Could not load this employee</div>
+        <div style="font-size:13px; color:var(--text-tertiary); margin-top:4px;">${esc(ui.error)}</div>
+        <a href="#/admin/employees" class="btn btn-primary btn-sm" style="margin-top:16px;">Back to Employees</a>
+      </div>
+    `;
+  }
+
+  // ------------------------------------------------------------------ DATA
+
+  async function loadData() {
+    try {
+      ui.error = null;
+      ui.employee = await adminStore.getEmployeeById(ui.empId);
+      try {
+        ui.payroll = await adminStore.getEmployeePayroll(ui.empId);
+        ui.payrollError = null;
+      } catch (err) {
+        ui.payroll = null;
+        ui.payrollError = err.status === 404 ? null : (err.message || 'Could not load payroll.');
+      }
+      ui.loaded = true;
+    } catch (err) {
+      ui.error = err.message || 'Failed to load employee.';
+    }
+    rerenderPageContent(view);
+  }
+
+  async function patchEmployee(patch, successMsg) {
+    try {
+      await adminStore.updateEmployee(ui.empId, patch);
+      showToast(successMsg, 'success');
+      await loadData(); // server reconciliation
+    } catch (err) {
+      showToast(err.message || 'Update failed.', 'danger');
+    }
+  }
+
+  // ------------------------------------------------------------------ MODALS
+
+  function modalErr(msg) {
+    const box = document.getElementById('modal-error-box');
+    if (!box) { showToast(msg, 'danger'); return; }
+    box.textContent = msg;
+    box.style.display = 'block';
+  }
 
   function openEditPersonalModal(emp) {
     openModal({
       title: 'Edit Personal Information',
       bodyHtml: `
-        <div class="form-group">
-          <label class="form-label">Phone</label>
-          <input type="text" id="f-phone" class="form-input" value="${emp.phone}" />
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group"><label class="form-label">First Name *</label><input id="ep-first" class="form-input" value="${esc(emp.firstName)}" /></div>
+          <div class="form-group"><label class="form-label">Last Name *</label><input id="ep-last" class="form-input" value="${esc(emp.lastName)}" /></div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Address</label>
-          <textarea id="f-address" class="form-textarea" rows="2">${emp.address}</textarea>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div class="form-group"><label class="form-label">Date of Birth</label><input type="date" id="ep-dob" class="form-input" value="${emp.dob ? esc(String(emp.dob).slice(0, 10)) : ''}" /></div>
+          <div class="form-group"><label class="form-label">Gender</label>
+            <select id="ep-gender" class="form-select">
+              ${['', 'Male', 'Female', 'Other'].map(g => `<option value="${g}" ${(emp.gender || '') === g ? 'selected' : ''}>${g || 'Prefer not to say'}</option>`).join('')}
+            </select>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Emergency Contact</label>
-          <input type="text" id="f-emergency" class="form-input" value="${emp.emergencyContact}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">About</label>
-          <textarea id="f-about" class="form-textarea" rows="3">${emp.about}</textarea>
-        </div>
+        <div class="form-group"><label class="form-label">Phone</label><input id="ep-phone" class="form-input" value="${esc(emp.phone || '')}" /></div>
+        <div class="form-group"><label class="form-label">Address</label><textarea id="ep-address" class="form-textarea" rows="2">${esc(emp.address || '')}</textarea></div>
+        <div class="form-group"><label class="form-label">About / Bio</label><textarea id="ep-about" class="form-textarea" rows="3">${esc(emp.about || '')}</textarea></div>
+        <div id="modal-error-box" style="display:none; padding:10px 12px; background-color:#fdecea; border:1px solid var(--danger); border-radius:var(--radius-sm); color:var(--danger); font-size:13px;"></div>
       `,
       footerHtml: `
-        <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
-        <button class="btn btn-primary" id="personal-save-btn">Save Changes</button>
-      `
+        <button class="btn btn-secondary" id="ep-cancel">Cancel</button>
+        <button class="btn btn-primary" id="ep-save">Save Changes</button>
+      `,
     });
 
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('personal-save-btn').addEventListener('click', () => {
-      adminStore.updateEmployee(emp.id, {
-        phone: document.getElementById('f-phone').value.trim(),
-        address: document.getElementById('f-address').value.trim(),
-        emergencyContact: document.getElementById('f-emergency').value.trim(),
-        about: document.getElementById('f-about').value.trim()
-      });
+    document.getElementById('ep-cancel').addEventListener('click', closeModal);
+    document.getElementById('ep-save').addEventListener('click', () => {
+      const firstName = document.getElementById('ep-first').value.trim();
+      const lastName = document.getElementById('ep-last').value.trim();
+      if (!firstName || !lastName) { modalErr('First and last names are required.'); return; }
+      patchEmployee({
+        firstName,
+        lastName,
+        dob: document.getElementById('ep-dob').value || null,
+        gender: document.getElementById('ep-gender').value || null,
+        phone: document.getElementById('ep-phone').value.trim() || null,
+        address: document.getElementById('ep-address').value.trim() || null,
+        about: document.getElementById('ep-about').value.trim() || null,
+      }, 'Personal details updated.');
       closeModal();
-      showToast('Personal information updated.', 'success');
-      rerenderPageContent(view);
     });
   }
 
@@ -366,269 +402,208 @@ export function createAdminEmployeeProfileView(params = {}) {
     openModal({
       title: 'Edit Job Information',
       bodyHtml: `
-        <div class="form-group">
-          <label class="form-label">Department</label>
-          <select id="f-dept" class="form-select">${DepartmentOptions(emp.department)}</select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Job Position</label>
-          <input type="text" id="f-position" class="form-input" value="${emp.position}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Employment Status</label>
-          <select id="f-status" class="form-select">
-            ${['Active', 'On Leave', 'Probation', 'Inactive'].map(s => `<option value="${s}" ${emp.employmentStatus === s ? 'selected' : ''}>${s}</option>`).join('')}
+        <div class="form-group"><label class="form-label">Department</label>
+          <select id="ej-dept" class="form-select">
+            ${['', 'Engineering', 'Human Resources', 'Finance', 'Marketing', 'Sales', 'Operations', 'Design', 'Product', 'General']
+              .map(d => `<option value="${d}" ${(emp.department || '') === d ? 'selected' : ''}>${d || 'Unassigned'}</option>`).join('')}
           </select>
         </div>
-        <div class="form-group">
-          <label class="form-label">Reporting Manager</label>
-          <input type="text" id="f-manager" class="form-input" value="${emp.manager}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Work Location</label>
-          <input type="text" id="f-location" class="form-input" value="${emp.location}" />
-        </div>
+        <div class="form-group"><label class="form-label">Job Position / Designation</label><input id="ej-pos" class="form-input" value="${esc(emp.designation || '')}" /></div>
+        <div class="form-group"><label class="form-label">Joining Date</label><input type="date" id="ej-joined" class="form-input" value="${emp.joiningDate ? esc(String(emp.joiningDate).slice(0, 10)) : ''}" /></div>
+        <div id="modal-error-box" style="display:none; padding:10px 12px; background-color:#fdecea; border:1px solid var(--danger); border-radius:var(--radius-sm); color:var(--danger); font-size:13px;"></div>
       `,
       footerHtml: `
-        <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
-        <button class="btn btn-primary" id="job-save-btn">Save Changes</button>
-      `
+        <button class="btn btn-secondary" id="ej-cancel">Cancel</button>
+        <button class="btn btn-primary" id="ej-save">Save Changes</button>
+      `,
     });
 
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('job-save-btn').addEventListener('click', () => {
-      adminStore.updateEmployee(emp.id, {
-        department: document.getElementById('f-dept').value,
-        position: document.getElementById('f-position').value.trim() || emp.position,
-        employmentStatus: document.getElementById('f-status').value,
-        manager: document.getElementById('f-manager').value.trim() || emp.manager,
-        location: document.getElementById('f-location').value.trim() || emp.location
-      });
+    document.getElementById('ej-cancel').addEventListener('click', closeModal);
+    document.getElementById('ej-save').addEventListener('click', () => {
+      patchEmployee({
+        department: document.getElementById('ej-dept').value || null,
+        designation: document.getElementById('ej-pos').value.trim() || null,
+        joiningDate: document.getElementById('ej-joined').value || undefined,
+      }, 'Job details updated.');
       closeModal();
-      showToast('Job information updated.', 'success');
-      rerenderPageContent(view);
     });
   }
 
-  function openEditSalaryModal(emp) {
-    const slip = adminStore.getPayslip(emp.id).slip;
-    openModal({
-      title: 'Edit Salary',
-      bodyHtml: `
-        <p style="font-size:13px; color:var(--text-secondary); margin-bottom:16px;">
-          Update the monthly wage for <strong>${emp.name}</strong>. Component breakdown below is a mock preview;
-          the backend will compute final statutory figures.
-        </p>
-        <div class="form-group">
-          <label class="form-label required">Monthly Wage (₹)</label>
-          <input type="number" id="f-wage" class="form-input" min="1" value="${slip.grossWage}" />
-        </div>
-        <div class="comment-bubble" id="wage-preview-note">
-          Current net pay preview: <strong>${formatINR(slip.netPay)}</strong> · Payable days: ${slip.payableDays}
-        </div>
-      `,
-      footerHtml: `
-        <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
-        <button class="btn btn-primary" id="salary-save-btn">Save Salary</button>
-      `
-    });
-
-    const wageInput = document.getElementById('f-wage');
-    wageInput.addEventListener('input', () => {
-      const preview = adminStore.computePayslip(Number(wageInput.value));
-      document.getElementById('wage-preview-note').innerHTML =
-        `New net pay preview: <strong>${formatINR(preview.netPay)}</strong> · Basic: ${formatINR(preview.basicSalary)} · PF: ${formatINR(preview.employeePF)}`;
-    });
-
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('salary-save-btn').addEventListener('click', () => {
-      const ok = adminStore.saveWage(emp.id, Number(wageInput.value));
-      closeModal();
-      if (ok) {
-        showToast('Salary updated (mock). Backend will compute actuals.', 'success');
-        rerenderPageContent(view);
+  async function saveWage(wageValue) {
+    const wage = Number(wageValue);
+    if (!wage || wage <= 0) { modalErr('Enter a valid positive monthly wage in ₹.'); return false; }
+    try {
+      if (ui.payroll?.salaryStructure) {
+        await adminStore.updateWage(ui.empId, wage);
       } else {
-        showToast('Please enter a valid wage amount.', 'danger');
+        await adminStore.saveWage(ui.empId, wage);
       }
-    });
+      showToast('Salary structure saved.', 'success');
+      closeModal();
+      ui.payrollError = null;
+      await loadData();
+      return true;
+    } catch (err) {
+      modalErr(err.message || 'Failed to save wage.');
+      return false;
+    }
   }
 
-  function openEditBankModal(emp) {
-    const b = emp.bank;
+  function openEditSalaryModal(existingWage = '') {
     openModal({
-      title: 'Edit Bank Information',
+      title: existingWage ? 'Update Monthly Wage' : 'Set Monthly Wage',
       bodyHtml: `
         <div class="form-group">
-          <label class="form-label">Bank Name</label>
-          <input type="text" id="f-bankname" class="form-input" value="${b.bankName}" />
+          <label class="form-label required">Gross Monthly Wage (₹)</label>
+          <input type="number" min="1" step="0.01" id="wage-input" class="form-input" placeholder="e.g. 50000" value="${esc(String(existingWage))}" />
+          <div style="font-size:12px; color:var(--text-tertiary); margin-top:6px;">
+            PF (12% of basic), professional tax and net pay are computed by the backend payroll engine — never in the browser.
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Account Number</label>
-          <input type="text" id="f-acct" class="form-input" value="${b.accountNumber}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">IFSC Code</label>
-          <input type="text" id="f-ifsc" class="form-input" value="${b.ifsc}" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Branch</label>
-          <input type="text" id="f-branch" class="form-input" value="${b.branch}" />
-        </div>
+        <div id="modal-error-box" style="display:none; padding:10px 12px; background-color:#fdecea; border:1px solid var(--danger); border-radius:var(--radius-sm); color:var(--danger); font-size:13px;"></div>
       `,
       footerHtml: `
-        <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
-        <button class="btn btn-primary" id="bank-save-btn">Save Bank Info</button>
-      `
-    });
-
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('bank-save-btn').addEventListener('click', () => {
-      adminStore.updateEmployee(emp.id, {
-        bank: {
-          ...b,
-          bankName: document.getElementById('f-bankname').value.trim(),
-          accountNumber: document.getElementById('f-acct').value.trim(),
-          ifsc: document.getElementById('f-ifsc').value.trim(),
-          branch: document.getElementById('f-branch').value.trim()
-        }
-      });
-      closeModal();
-      showToast('Bank information updated.', 'success');
-      rerenderPageContent(view);
-    });
-  }
-
-  function openAddCertModal(emp) {
-    openModal({
-      title: 'Add Certification',
-      bodyHtml: `
-        <div class="form-group">
-          <label class="form-label required">Certification Name</label>
-          <input type="text" id="f-cert-name" class="form-input" placeholder="e.g. AWS Solutions Architect" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Issuer</label>
-          <input type="text" id="f-cert-issuer" class="form-input" placeholder="e.g. Amazon Web Services" />
-        </div>
-        <div class="form-group">
-          <label class="form-label">Year</label>
-          <input type="number" id="f-cert-year" class="form-input" min="2000" max="2100" placeholder="2026" />
-        </div>
+        <button class="btn btn-secondary" id="ws-cancel">Cancel</button>
+        <button class="btn btn-primary" id="ws-save">Save Wage</button>
       `,
-      footerHtml: `
-        <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
-        <button class="btn btn-primary" id="cert-save-btn">Add Certification</button>
-      `
     });
 
-    document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-    document.getElementById('cert-save-btn').addEventListener('click', () => {
-      const name = document.getElementById('f-cert-name').value.trim();
-      if (!name) {
-        showToast('Certification name is required.', 'danger');
-        return;
-      }
-      const certifications = [...(emp.certifications || []), {
-        name,
-        issuer: document.getElementById('f-cert-issuer').value.trim() || '-',
-        year: document.getElementById('f-cert-year').value || new Date().getFullYear()
-      }];
-      adminStore.updateEmployee(emp.id, { certifications });
-      closeModal();
-      showToast('Certification added.', 'success');
-      rerenderPageContent(view);
-    });
+    document.getElementById('ws-cancel').addEventListener('click', closeModal);
+    document.getElementById('ws-save').addEventListener('click', () => saveWage(document.getElementById('wage-input').value));
   }
 
-  // ---------------------------------------------------------------- BINDINGS
+  function bindTabEvents() {
+    const emp = ui.employee;
 
-  function bindTabEvents(emp) {
-    document.querySelectorAll('.tab-btn[data-tab]').forEach(btn => {
+    document.querySelectorAll('#profile-tabs .tab-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        ui.tab = btn.dataset.tab;
-        rerenderPageContent(view);
+        if (btn.dataset.tab !== ui.tab) {
+          ui.tab = btn.dataset.tab;
+          rerenderPageContent(view);
+        }
       });
     });
 
     document.getElementById('edit-personal-btn')?.addEventListener('click', () => openEditPersonalModal(emp));
     document.getElementById('edit-job-btn')?.addEventListener('click', () => openEditJobModal(emp));
-    document.getElementById('edit-bank-btn')?.addEventListener('click', () => openEditBankModal(emp));
+    document.getElementById('set-wage-btn')?.addEventListener('click', () => openEditSalaryModal());
+    document.getElementById('edit-salary-btn')?.addEventListener('click', () => openEditSalaryModal(ui.payroll?.salaryStructure?.monthlyWage || ''));
 
-    // Documents tab
-    document.getElementById('resume-download-btn')?.addEventListener('click', () =>
-      showToast('Resume download is a mock action until backend file storage is connected.', 'info'));
-    document.getElementById('resume-replace-btn')?.addEventListener('click', () => document.getElementById('resume-file-input')?.click());
-    document.getElementById('resume-file-input')?.addEventListener('change', (e) => {
-      if (e.target.files.length) {
-        showToast(`"${e.target.files[0].name}" queued for upload (mock).`, 'info');
+    // Generate payslip
+    document.getElementById('generate-payslip-btn')?.addEventListener('click', async () => {
+      const monthInput = document.getElementById('generate-payslip-month');
+      const month = monthInput.value || new Date().toISOString().slice(0, 7);
+      const btn = document.getElementById('generate-payslip-btn');
+      btn.disabled = true;
+      try {
+        await adminStore.generatePayslip(ui.empId, month);
+        showToast(`Payslip generated for ${month}.`, 'success');
+        await loadData();
+      } catch (err) {
+        showToast(err.message || 'Payslip generation failed.', 'danger');
+        btn.disabled = false;
       }
     });
-    document.getElementById('add-cert-btn')?.addEventListener('click', () => openAddCertModal(emp));
+
+    // Account changes
+    document.getElementById('acct-save-btn')?.addEventListener('click', () => {
+      const role = document.getElementById('acct-role').value;
+      const status = document.getElementById('acct-status').value;
+      patchEmployee({ role, status }, 'Access settings updated.');
+    });
+
+    // Skills
+    document.getElementById('add-skill-btn')?.addEventListener('click', () => {
+      openModal({
+        title: 'Add Skill',
+        bodyHtml: `
+          <div class="form-group">
+            <label class="form-label required">Skill</label>
+            <input id="new-skill-input" class="form-input" placeholder="e.g. React, Payroll Compliance" />
+          </div>
+          <div id="modal-error-box" style="display:none; padding:10px 12px; background-color:#fdecea; border:1px solid var(--danger); border-radius:var(--radius-sm); color:var(--danger); font-size:13px;"></div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" id="ns-cancel">Cancel</button>
+          <button class="btn btn-primary" id="ns-save">Add Skill</button>
+        `,
+      });
+      document.getElementById('ns-cancel').addEventListener('click', closeModal);
+      document.getElementById('ns-save').addEventListener('click', () => {
+        const skill = document.getElementById('new-skill-input').value.trim();
+        if (!skill) { modalErr('Skill cannot be empty.'); return; }
+        closeModal();
+        patchEmployee({ skills: [...(emp.skills || []), skill] }, `Skill '${skill}' added.`);
+      });
+    });
+
+    document.querySelectorAll('.remove-skill-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.removeSkill);
+        const skills = (emp.skills || []).filter((_, i) => i !== idx);
+        patchEmployee({ skills }, 'Skill removed.');
+      });
+    });
+
+    // Certifications
+    document.getElementById('add-cert-btn')?.addEventListener('click', () => {
+      openModal({
+        title: 'Add Certification',
+        bodyHtml: `
+          <div class="form-group"><label class="form-label required">Title</label><input id="nc-name" class="form-input" /></div>
+          <div class="form-group"><label class="form-label required">Issuer</label><input id="nc-issuer" class="form-input" /></div>
+          <div class="form-group"><label class="form-label">Year</label><input id="nc-year" class="form-input" placeholder="2026" /></div>
+          <div id="modal-error-box" style="display:none; padding:10px 12px; background-color:#fdecea; border:1px solid var(--danger); border-radius:var(--radius-sm); color:var(--danger); font-size:13px;"></div>
+        `,
+        footerHtml: `
+          <button class="btn btn-secondary" id="nc-cancel">Cancel</button>
+          <button class="btn btn-primary" id="nc-save">Add Certification</button>
+        `,
+      });
+      document.getElementById('nc-cancel').addEventListener('click', closeModal);
+      document.getElementById('nc-save').addEventListener('click', () => {
+        const name = document.getElementById('nc-name').value.trim();
+        const issuer = document.getElementById('nc-issuer').value.trim();
+        const year = document.getElementById('nc-year').value.trim();
+        if (!name || !issuer) { modalErr('Title and issuer are required.'); return; }
+        closeModal();
+        patchEmployee({
+          certifications: [...(emp.certifications || []), `${name}${CERT_SEPARATOR}${issuer}${CERT_SEPARATOR}${year}`],
+        }, 'Certification added.');
+      });
+    });
 
     document.querySelectorAll('[data-remove-cert]').forEach(btn => {
       btn.addEventListener('click', () => {
-        const certifications = [...(emp.certifications || [])];
-        certifications.splice(Number(btn.dataset.removeCert), 1);
-        adminStore.updateEmployee(emp.id, { certifications });
-        showToast('Certification removed.', 'success');
-        rerenderPageContent(view);
+        const idx = Number(btn.dataset.removeCert);
+        const certifications = (emp.certifications || []).filter((_, i) => i !== idx);
+        patchEmployee({ certifications }, 'Certification removed.');
       });
     });
-
-    document.querySelectorAll('[data-remove-skill]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const skills = [...(emp.skills || [])];
-        skills.splice(Number(btn.dataset.removeSkill), 1);
-        adminStore.updateEmployee(emp.id, { skills });
-        showToast('Skill removed.', 'success');
-        rerenderPageContent(view);
-      });
-    });
-
-    const addSkillForm = document.getElementById('add-skill-form');
-    addSkillForm?.addEventListener('submit', (e) => {
-      e.preventDefault();
-      const input = document.getElementById('new-skill-input');
-      const skill = input.value.trim();
-      if (!skill) return;
-      if ((emp.skills || []).some(s => s.toLowerCase() === skill.toLowerCase())) {
-        showToast('That skill already exists.', 'danger');
-        return;
-      }
-      adminStore.updateEmployee(emp.id, { skills: [...(emp.skills || []), skill] });
-      showToast('Skill added.', 'success');
-      rerenderPageContent(view);
-    });
-
-    // Salary tab
-    document.getElementById('profile-edit-salary-btn')?.addEventListener('click', () => openEditSalaryModal(emp));
-    document.getElementById('goto-payroll-btn')?.addEventListener('click', () => router.navigate('/admin/payroll'));
   }
 
   const view = {
     render() {
-      return renderAdminLayout('/admin/employees', 'Employee Profile', ui.loaded ? contentHtml() : skeletonHtml());
+      if (!ui.loaded && !ui.error) {
+        return renderAdminLayout(`/admin/employees/${ui.empId}`, 'Employee Profile', `
+          <div class="skeleton" style="height:150px; border-radius:16px; margin-bottom:20px;"></div>
+          <div class="skeleton" style="height:44px; margin-bottom:20px;"></div>
+          <div class="skeleton" style="height:320px; border-radius:16px;"></div>
+        `);
+      }
+      if (ui.error) return renderAdminLayout(`/admin/employees/${ui.empId}`, 'Employee Profile', errorHtml());
+      return renderAdminLayout(`/admin/employees/${ui.empId}`, 'Employee Profile', contentHtml());
     },
 
     afterRender() {
       initAdminLayoutEvents();
-      if (!ui.loaded) {
-        simulateFetch(450).then(() => {
-          ui.loaded = true;
-          rerenderPageContent(view);
-        });
-      } else {
-        view.bindEvents();
-      }
+      if (!ui.loaded && !ui.error) { loadData(); return; }
+      bindTabEvents();
     },
 
-    bindEvents() {
-      const emp = adminStore.getEmployeeById(ui.empId);
-      if (!emp) return; // error state has no interactive controls
-      bindTabEvents(emp);
-    },
+    bindEvents() { bindTabEvents(); },
 
-    unmount() { /* no subscriptions */ }
+    unmount() { /* stateless */ }
   };
 
   return view;
