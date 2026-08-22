@@ -80,13 +80,26 @@ class AdminService {
 
   // ----------------------------------------------------------------------- LEAVE
 
-  /** GET /api/admin/leaves?status=&page=&limit= */
-  async getLeaves({ status = '', page = 1, limit = 50 } = {}) {
+  /** GET /api/admin/leaves?status=&leaveType=&employeeId=&department=&from=&to=&page=&limit= */
+  async getLeaves({
+    status = '', leaveType = '', employeeId = '', department = '',
+    from = '', to = '', page = 1, limit = 50,
+  } = {}) {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
+    if (leaveType) params.set('leaveType', leaveType);
+    if (employeeId) params.set('employeeId', employeeId);
+    if (department) params.set('department', department);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
     params.set('page', String(page));
     params.set('limit', String(limit));
     return api.get(`/api/admin/leaves?${params.toString()}`);
+  }
+
+  /** GET /api/admin/leaves/:id — single request with employee + decidedBy. */
+  getLeaveById(requestId) {
+    return api.get(`/api/admin/leaves/${encodeURIComponent(requestId)}`);
   }
 
   /** Pending-count helper used by sidebar badge (cheap single fetch). */
