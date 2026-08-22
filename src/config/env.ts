@@ -11,4 +11,5 @@ export const config = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   companyName: process.env.COMPANY_NAME || 'Odoo India',
   standardWorkHoursPerDay: parseFloat(process.env.STANDARD_WORK_HOURS_PER_DAY || '8'),
+  maxUploadSizeMb: parseInt(process.env.MAX_UPLOAD_SIZE_MB || '5', 10),
 };

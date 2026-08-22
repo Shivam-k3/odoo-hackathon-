@@ -140,8 +140,10 @@ async function ensureDatabases() {
     await client.connect();
     const res = await client.query('SELECT 1 FROM pg_database WHERE datname = $1', [dbName]);
     if (res.rowCount === 0) {
-      await client.query(`CREATE DATABASE "${dbName}"`);
-      console.log(`Created database ${dbName}`);
+      await client.query(
+        `CREATE DATABASE ${dbName} TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C'`
+      );
+      console.log(`Created database ${dbName} (UTF8)`);
     }
     await client.end();
   }
