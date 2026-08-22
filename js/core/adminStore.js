@@ -151,15 +151,32 @@ class AdminService {
    * GET /api/admin/reports/:type?type=attendance|leaves|payroll|employees
    * Returns JSON object or raw CSV string depending on `format`.
    */
-  getReport(type, { from, to, department = '', status = '', employeeId = '', format = 'json' } = {}) {
+  getReport(type, { from, to, department = '', status = '', employeeId = '', leaveType = '', month = '', search = '', format = 'json' } = {}) {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to) params.set('to', to);
     if (department) params.set('department', department);
     if (status) params.set('status', status);
     if (employeeId) params.set('employeeId', employeeId);
+    if (type === 'leaves' && leaveType) params.set('leaveType', leaveType);
+    if (type === 'payroll' && month) params.set('month', month);
+    if (type === 'employees' && search) params.set('search', search);
     params.set('format', format);
     return api.get(`/api/admin/reports/${type}?${params.toString()}`);
+  }
+
+  /** Build the same filter object used by getReport — keeps CSV exports identical to previews. */
+  reportFilters({ from = '', to = '', department = '', status = '', employeeId = '', leaveType = '', month = '', search = '' } = {}) {
+    const f = {};
+    if (from) f.from = from;
+    if (to) f.to = to;
+    if (department) f.department = department;
+    if (status) f.status = status;
+    if (employeeId) f.employeeId = employeeId;
+    if (leaveType) f.leaveType = leaveType;
+    if (month) f.month = month;
+    if (search) f.search = search;
+    return f;
   }
 
   /** Download CSV by navigating the browser to the endpoint (auth via token header is required,
