@@ -139,7 +139,7 @@ describe('Security Tests (auth, RBAC, IDOR, injection, XSS)', () => {
 
   it('forbids EMPLOYEE from listing all employees', async () => {
     const res = await request(app)
-      .get('/api/admin/employees')
+      .get('/api/employees')
       .set('Authorization', `Bearer ${employeeToken}`);
     expect(res.status).toBe(403);
   });
@@ -160,7 +160,7 @@ describe('Security Tests (auth, RBAC, IDOR, injection, XSS)', () => {
 
   it('allows ADMIN_HR on the same admin surface (control test)', async () => {
     const res = await request(app)
-      .get('/api/admin/employees?limit=5')
+      .get('/api/employees?limit=5')
       .set('Authorization', `Bearer ${adminToken}`);
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
@@ -236,7 +236,7 @@ describe('Security Tests (auth, RBAC, IDOR, injection, XSS)', () => {
 
     // Admin directory search returns JSON too
     const list = await request(app)
-      .get('/api/admin/employees?search=Probe&limit=10')
+      .get('/api/employees?search=Probe&limit=10')
       .set('Authorization', `Bearer ${adminToken}`);
     expect(String(list.headers['content-type'])).toContain('application/json');
   });
