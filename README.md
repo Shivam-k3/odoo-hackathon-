@@ -27,7 +27,7 @@
 
 ## 🌟 Overview
 
-This service implements the core authentication, identity management, employee profile self-service, administrative directory, and attendance tracking workflows for the Dayflow HRMS platform.
+This service implements the core authentication, identity management, employee profile self-service, administrative directory, and attendance tracking workflows for the Dayflow HRMS platform — **plus the complete vanilla-JS web portal** (employee self-service and admin/HR console), served directly by Express from the repo root (`index.html`, `/js`, `/css`) with deep-linkable routes.
 
 ---
 
@@ -53,6 +53,13 @@ This service implements the core authentication, identity management, employee p
 - **Automatic Calculations**: Work hours (rounded to 2 decimals) and overtime calculations computed on the backend.
 - **Status Classification**: Classifies attendance as `PRESENT`, `ABSENT`, `HALF_DAY` (< 4 hours worked), or `LEAVE`.
 - **Reporting & Summaries**: Personal daily/weekly/monthly logs and company-wide admin rosters & monthly summaries.
+
+### 5. Web Portal (Employee + Admin/HR Console)
+- **Single-Page App**: Hash-free client-side router served by Express; every admin surface (Dashboard, Employees, Attendance, Leave, Payroll, Reports, Profile) runs on **live REST APIs** — no mock data anywhere.
+- **Leave Workflow**: Admins approve/reject requests (with mandatory rejection comments) from a filterable queue; employees request leave and track balances.
+- **Payroll**: Salary structure upserts, payslip generation, and payroll reports with INR formatting.
+- **Reports & Exports**: Attendance / Leave / Payroll / Employee reports with server-generated CSV downloads.
+- **Real-Time UX**: Skeleton loaders, toast notifications, notification bell, XSS-escaped rendering throughout.
 
 ---
 
@@ -207,12 +214,15 @@ Complete request and response specifications are available in [`API_DOCUMENTATIO
 - **Role Isolation**: Non-admin users cannot access `/api/employees` (list/create/update other records) or `/api/attendance/admin/*`.
 - **Identity Isolation**: Employees can only punch and view their own attendance records; identity is bound strictly to the authenticated JWT.
 - **Sanitized Errors**: Stack traces and internal database errors are shielded in responses.
+- **Strict CSP**: Helmet enforces a Content-Security-Policy locked to same-origin plus the pinned CDN assets (lucide icons, Google Fonts).
+- **XSS Defense-in-Depth**: All user-supplied content is HTML-escaped before DOM insertion in the SPA; APIs always respond `application/json` (no HTML execution context).
+- **Injection Probes Covered**: A dedicated security test suite (`tests/security.test.ts`) covers JWT forgery/tampering, RBAC enforcement, IDOR attempts, SQL/NoSQL-style payloads, oversized inputs, and credential leakage.
 
 ---
 
 ## 🧪 Testing
 
-The backend includes a comprehensive automated test suite with **36 unit & integration tests** covering all auth, permissions, login ID generation, and attendance calculation scenarios.
+The backend includes a comprehensive automated test suite covering auth, permissions, login ID generation, attendance calculations, leave/payroll workflows, reporting endpoints, and a **dedicated security regression suite**.
 
 Run tests:
 ```bash
