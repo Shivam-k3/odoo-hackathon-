@@ -2,11 +2,11 @@
   "name": "dayflow-hrms-backend",
   "version": "1.0.0",
   "description": "Dayflow HRMS Backend - Authentication, Employee Management & Attendance",
-  "main": "dist/server.js",
+  "main": "dist/src/server.js",
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "rimraf dist && tsc",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
     "test": "jest --runInBand --forceExit"
