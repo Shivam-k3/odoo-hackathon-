@@ -50,13 +50,32 @@ class AdminService {
     return api.get('/api/attendance/admin/today');
   }
 
-  /** GET /api/attendance/me/monthly for ANY employee (admin-authorized route) */
-  getEmployeeMonthlyAttendance(employeeId, month) {
-    // Admins read another employee's monthly attendance via reports API.
+  /**
+   * GET /api/attendance/admin/employee/:employeeId?startDate=&endDate=&limit=
+   * Backend returns { employee, total, page, limit, totalPages, records }.
+   */
+  async getEmployeeMonthlyAttendance(employeeId, month) {
     const [year, mon] = month.split('-');
-    const from = `${month}-01`;
-    const to = new Date(Number(year), Number(mon), 0).toISOString().slice(0, 10);
-    return this.getReport('attendance', { from, to, format: 'json' });
+    const startDate = `${month}-01`;
+    const endDate = new Date(Number(year), Number(mon), 0)
+      .toISOString()
+      .slice(0, 10);
+    const params = new URLSearchParams({
+      startDate,
+      endDate,
+      limit: '50',
+      page: '1',
+    });
+    const data = await api.get(
+      `/api/attendance/admin/employee/${encodeURIComponent(employeeId)}?${params.toString()}`
+    );
+    return { employee: data.employee, records: data.records || [] };
+  }
+
+  /** GET /api/attendance/admin/monthly-summary?month=YYYY-MM — company aggregates. */
+  getMonthlySummary(month) {
+    const q = month ? `?month=${encodeURIComponent(month)}` : '';
+    return api.get(`/api/attendance/admin/monthly-summary${q}`);
   }
 
   // ----------------------------------------------------------------------- LEAVE
@@ -119,12 +138,13 @@ class AdminService {
    * GET /api/admin/reports/:type?type=attendance|leaves|payroll|employees
    * Returns JSON object or raw CSV string depending on `format`.
    */
-  getReport(type, { from, to, department = '', status = '', format = 'json' } = {}) {
+  getReport(type, { from, to, department = '', status = '', employeeId = '', format = 'json' } = {}) {
     const params = new URLSearchParams();
     if (from) params.set('from', from);
     if (to) params.set('to', to);
     if (department) params.set('department', department);
     if (status) params.set('status', status);
+    if (employeeId) params.set('employeeId', employeeId);
     params.set('format', format);
     return api.get(`/api/admin/reports/${type}?${params.toString()}`);
   }

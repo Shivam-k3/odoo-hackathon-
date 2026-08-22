@@ -1,5 +1,6 @@
 // DAYFLOW HRMS — ATTENDANCE TABLE COMPONENT (ADMIN)
 
+import { esc } from '../../core/api.js';
 import { StatusBadge } from './StatusBadge.js';
 
 /**
@@ -41,12 +42,13 @@ export function AttendanceTable(columns, rows, { minWidthClass = 'table-min-720'
 // Shared column factories so every admin table renders people consistently.
 export function EmployeeCell(emp) {
   if (!emp) return '<span class="cell-muted">Unknown</span>';
+  const name = esc(emp.name || 'Unknown');
   return `
     <div class="employee-cell">
-      <span class="av-circle av-sm">${emp.name.split(' ').map(w => w[0]).slice(0, 2).join('')}</span>
+      <span class="av-circle av-sm">${esc(String(emp.name || '?').split(' ').map(w => w[0]).slice(0, 2).join(''))}</span>
       <span style="min-width:0;">
-        <span style="display:block; font-weight:600; font-size:14px;" class="cell-strong">${emp.name}</span>
-        <span style="display:block; font-size:12px; color:var(--text-tertiary);">${emp.id}</span>
+        <span style="display:block; font-weight:600; font-size:14px;" class="cell-strong">${name}</span>
+        <span style="display:block; font-size:12px; color:var(--text-tertiary);">${esc(emp.id || '')}</span>
       </span>
     </div>
   `;

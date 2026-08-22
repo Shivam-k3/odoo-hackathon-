@@ -3,11 +3,11 @@
 //   att-filter-search · att-filter-employee · att-filter-status
 //   att-filter-date · att-filter-month · att-filter-clear
 
-import { esc } from '../../core/api.js';
+import { esc, currentMonthKey } from '../../core/api.js';
 import { DEPARTMENT_OPTIONS } from '../../core/adminStore.js';
 
 export function AttendanceFilters(employees, values = {}, opts = {}) {
-  const { showDate = true, showMonth = false, showStatus = true } = opts;
+  const { showDate = true, showMonth = false, showStatus = true, showDepartment = false } = opts;
   const employeeOptions = employees.map(e =>
     `<option value="${esc(e.id)}" ${values.employeeId === e.id ? 'selected' : ''}>${esc(e.name)} (${esc(e.loginId || e.id)})</option>`
   ).join('');
@@ -47,10 +47,21 @@ export function AttendanceFilters(employees, values = {}, opts = {}) {
         <input type="date" id="att-filter-date" class="form-input" value="${values.date || ''}" />
       </div>` : ''}
 
+      ${showDepartment ? `
+      <div class="filter-group">
+        <label class="filter-label" for="att-filter-dept">Department</label>
+        <select id="att-filter-dept" class="form-select">
+          <option value="">All Departments</option>
+          ${DEPARTMENT_OPTIONS.map(d =>
+            `<option value="${esc(d)}" ${values.department === d ? 'selected' : ''}>${esc(d)}</option>`
+          ).join('')}
+        </select>
+      </div>` : ''}
+
       ${showMonth ? `
       <div class="filter-group">
         <label class="filter-label" for="att-filter-month">Month</label>
-        <input type="month" id="att-filter-month" class="form-input" value="${values.month || '2026-08'}" />
+        <input type="month" id="att-filter-month" class="form-input" value="${values.month || currentMonthKey()}" />
       </div>` : ''}
 
       <div class="filter-actions">
