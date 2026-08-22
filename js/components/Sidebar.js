@@ -1,6 +1,7 @@
-// DAYFLOW HRMS — SIDEBAR COMPONENT (EMPLOYEE ONLY)
+﻿// DAYFLOW HRMS â€” SIDEBAR COMPONENT (EMPLOYEE ONLY)
 
 import { store } from '../core/store.js';
+import { esc } from '../core/api.js';
 
 export function renderSidebar(currentPath) {
   const state = store.getState();
@@ -40,11 +41,11 @@ export function renderSidebar(currentPath) {
       <div class="sidebar-footer">
         <div class="user-mini-card">
           <div class="user-avatar" style="width: 32px; height: 32px; font-size: 12px;">
-            ${user.avatar ? `<img src="${user.avatar}" class="user-avatar" style="width: 32px; height: 32px;" alt="${user.name}">` : user.name ? user.name.charAt(0) : 'E'}
+            ${user.avatar ? `<img src="${esc(user.avatar)}" class="user-avatar" style="width: 32px; height: 32px;" alt="${esc(user.name)}">` : user.name ? esc(user.name.charAt(0)) : 'E'}
           </div>
           <div style="overflow: hidden;">
-            <div style="font-weight: 600; font-size: 13px; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${user.name || 'Employee'}</div>
-            <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${user.designation || 'Staff'}</div>
+            <div style="font-weight: 600; font-size: 13px; color: var(--text-main); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(user.name || 'Employee')}</div>
+            <div style="font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${esc(user.designation || 'Staff')}</div>
           </div>
         </div>
       </div>
@@ -63,3 +64,4 @@ export function initSidebarEvents() {
     });
   }
 }
+

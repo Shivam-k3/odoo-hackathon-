@@ -2,6 +2,8 @@
 
 import { store } from '../core/store.js';
 import { router } from '../core/router.js';
+import { authService } from '../core/authService.js';
+import { esc } from '../core/api.js';
 
 export function renderNavbar(pageTitle = 'Dashboard') {
   const state = store.getState();
@@ -15,7 +17,7 @@ export function renderNavbar(pageTitle = 'Dashboard') {
         <button class="menu-toggle-btn" id="mobile-menu-btn" title="Toggle Sidebar">
           <i data-lucide="menu" style="width: 20px; height: 20px;"></i>
         </button>
-        <h1 class="page-title">${pageTitle}</h1>
+        <h1 class="page-title">${esc(pageTitle)}</h1>
       </div>
 
       <div class="navbar-right">
@@ -32,15 +34,15 @@ export function renderNavbar(pageTitle = 'Dashboard') {
         <div class="user-menu-wrapper">
           <button class="user-avatar-btn" id="user-menu-btn">
             <div class="user-avatar">
-              ${user.avatar ? `<img src="${user.avatar}" class="user-avatar" alt="${user.name}">` : (user.name ? user.name.charAt(0) : 'U')}
+              ${user.avatar ? `<img src="${esc(user.avatar)}" class="user-avatar" alt="${esc(user.name)}">` : (user.name ? esc(user.name.charAt(0)) : 'U')}
             </div>
             <i data-lucide="chevron-down" style="width: 16px; height: 16px; color: var(--text-secondary);"></i>
           </button>
 
           <div class="dropdown-menu" id="user-dropdown-menu">
             <div class="dropdown-header">
-              <div class="dropdown-user-name">${user.name || 'User'}</div>
-              <div class="dropdown-user-role">${user.role || 'Employee'} • ${user.id || ''}</div>
+              <div class="dropdown-user-name">${esc(user.name || 'User')}</div>
+              <div class="dropdown-user-role">${esc(user.role || 'Employee')} • ${esc(user.id || '')}</div>
             </div>
             <button class="dropdown-item" id="menu-profile-btn">
               <i data-lucide="user" style="width: 16px; height: 16px;"></i>
@@ -62,6 +64,10 @@ export function renderNavbar(pageTitle = 'Dashboard') {
   `;
 }
 
+// Module-level handler references so re-init on every route change REPLACES
+// the previous listeners instead of stacking duplicates (bug fix).
+let docClickHandler = null;
+
 export function initNavbarEvents() {
   const menuBtn = document.getElementById('user-menu-btn');
   const dropdown = document.getElementById('user-dropdown-menu');
@@ -76,30 +82,44 @@ export function initNavbarEvents() {
     });
   }
 
+  if (docClickHandler) {
+    document.removeEventListener('click', docClickHandler);
+    docClickHandler = null;
+  }
+
   if (menuBtn && dropdown) {
     menuBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       dropdown.classList.toggle('show');
     });
 
-    document.addEventListener('click', () => {
-      dropdown.classList.remove('show');
-    });
+    // Close the dropdown when clicking anywhere else. The handler is stored
+    // and removed before the next navbar init — previously every navigation
+    // attached another listener that accumulated forever.
+    docClickHandler = () => dropdown.classList.remove('show');
+    document.addEventListener('click', docClickHandler);
   }
 
   const profileBtn = document.getElementById('menu-profile-btn');
   if (profileBtn) {
-    profileBtn.addEventListener('click', () => router.navigate('/employee/profile'));
+    profileBtn.addEventListener('click', () => {
+      if (store.getState().user?.role === 'Admin') router.navigate('/admin/employees');
+      else router.navigate('/employee/profile');
+    });
   }
 
   const attendanceBtn = document.getElementById('menu-attendance-btn');
   if (attendanceBtn) {
-    attendanceBtn.addEventListener('click', () => router.navigate('/employee/attendance'));
+    attendanceBtn.addEventListener('click', () => {
+      if (store.getState().user?.role === 'Admin') router.navigate('/admin/attendance');
+      else router.navigate('/employee/attendance');
+    });
   }
 
   const logoutBtn = document.getElementById('menu-logout-btn');
   if (logoutBtn) {
-    logoutBtn.addEventListener('click', () => {
+    logoutBtn.addEventListener('click', async () => {
+      await authService.logout();
       store.logout();
       router.navigate('/login');
     });

@@ -1,99 +1,135 @@
-// DAYFLOW HRMS — AUTHENTICATION SERVICE ADAPTER
+// DAYFLOW HRMS — AUTHENTICATION SERVICE (REAL BACKEND)
 //
-// ARCHITECTURE NOTE (Backend Integration Point):
-// The UI (Login/Signup views) depends ONLY on this adapter's stable contract:
-//   authService.login({ loginId?, email?, password, role? }) -> { success, user }
-//   authService.signup({ email, password, role? })           -> { success, user }
-//   authService.logout()                                     -> void
-// To integrate the real backend later, replace ONLY the MOCK provider below
-// with REST/JWT calls (e.g. POST /api/v1/auth/login, /api/v1/auth/signup).
-// No view or router code needs to change.
+// Talks to the Express/PostgreSQL backend:
+//   POST /api/auth/signup  { email, password, firstName, lastName, role?, department? }
+//   POST /api/auth/login   { loginIdentifier, password }
+//   GET  /api/auth/me
+//   POST /api/auth/logout
+//
+// The backend JWT + user snapshot are cached in localStorage so a refresh
+// keeps you signed in — but a FRESH browser has no session and always lands
+// on the login page. The backend remains the sole source of truth for roles.
 
-import { store } from './store.js';
+import { api, setToken, getToken } from './api.js';
 
-// ---------------------------------------------------------------------------
-// MOCK AUTH PROVIDER — frontend development/testing ONLY. Not real auth.
-// Delete this entire section when wiring the backend API.
-// ---------------------------------------------------------------------------
+const USER_KEY = 'DAYFLOW_USER_SESSION_V1';
 
-const MOCK_NETWORK_DELAY_MS = 600;
+/** Backend role enum -> frontend portal role. */
+function mapRole(role) {
+  return role === 'ADMIN_HR' ? 'Admin' : 'Employee';
+}
 
-async function mockLogin(credentials) {
-  // Simulated network delay for frontend prototype
-  await new Promise(resolve => setTimeout(resolve, MOCK_NETWORK_DELAY_MS));
+/** Flatten the backend { user, employee } payload into the UI user shape. */
+export function toUiUser(data) {
+  const u = data.user || {};
+  const e = data.employee || {};
+  const name = `${e.firstName || ''} ${e.lastName || ''}`.trim() || (u.email ? u.email.split('@')[0] : 'User');
+  return {
+    id: e.loginId || u.id,
+    userId: u.id,
+    employeeId: e.id,
+    name,
+    firstName: e.firstName || '',
+    lastName: e.lastName || '',
+    email: u.email || e.email || '',
+    role: mapRole(u.role),
+    avatar: e.profilePicture || null,
+    department: e.department || '',
+    designation: e.designation || '',
+    joiningDate: e.joiningDate ? String(e.joiningDate).slice(0, 10) : ''
+  };
+}
 
-  // Admin/HR mock session (frontend prototype only)
-  if (credentials.role === 'Admin') {
-    return {
-      success: true,
-      user: {
-        id: 'ADM-0001', // placeholder until backend assigns real Login ID
-        name: 'Priya Sharma',
-        email: credentials.email || 'priya.sharma@dayflow.com',
-        role: 'Admin',
-        avatar: null,
-        department: 'Human Resources',
-        designation: 'HR Manager',
-        joiningDate: '2020-04-06'
-      }
-    };
+function cacheSession(token, uiUser) {
+  if (token) setToken(token);
+  localStorage.setItem(USER_KEY, JSON.stringify(uiUser));
+}
+
+export function clearSession() {
+  setToken('');
+  localStorage.removeItem(USER_KEY);
+}
+
+export function cachedUser() {
+  try {
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
   }
-
-  // Backend-provided user object schema.
-  // NOTE: Login ID is ALWAYS assigned by the backend system upon account
-  // activation. The id below is a frontend prototype placeholder only and is
-  // NOT a production ID format.
-  const userPayload = {
-    id: credentials.loginId || credentials.email || 'EMP-1001', // placeholder until backend assigns real Login ID
-    name: credentials.email ? credentials.email.split('@')[0].replace('.', ' ') : 'Sarah Jenkins',
-    email: credentials.email || 'sarah.jenkins@dayflow.com',
-    role: credentials.role || 'Employee',
-    avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=150&auto=format&fit=crop&q=80',
-    department: 'Engineering',
-    designation: 'Senior Frontend Developer',
-    joiningDate: '2022-03-15'
-  };
-
-  return { success: true, user: userPayload };
 }
 
-async function mockSignup(registrationData) {
-  await new Promise(resolve => setTimeout(resolve, MOCK_NETWORK_DELAY_MS));
-
-  const userPayload = {
-    id: registrationData.empId || 'EMP-1002', // placeholder — real Login/Employee ID comes from the backend
-    name: registrationData.email.split('@')[0].replace('.', ' '),
-    email: registrationData.email,
-    role: registrationData.role || 'Employee',
-    avatar: null,
-    department: 'Engineering',
-    designation: 'Software Developer',
-    joiningDate: new Date().toISOString().split('T')[0]
-  };
-
-  return { success: true, user: userPayload };
+/**
+ * Restore a session after page refresh: token must exist locally AND still
+ * validate against the backend (/auth/me). Returns the UI user or null.
+ */
+async function restoreSession() {
+  if (!getToken()) return null;
+  try {
+    const data = await api.get('/api/auth/me');
+    const uiUser = toUiUser({ user: { ...data, employee: data.employee }, employee: data.employee });
+    // /auth/me returns the user object with an embedded employee
+    localStorage.setItem(USER_KEY, JSON.stringify(uiUser));
+    return uiUser;
+  } catch (err) {
+    clearSession();
+    return null;
+  }
 }
-
-// ---------------------------------------------------------------------------
-// END MOCK PROVIDER
-// ---------------------------------------------------------------------------
 
 export const authService = {
-  /** Authenticate user credentials -> backend API POST /api/v1/auth/login */
-  async login(credentials) {
-    const res = await mockLogin(credentials);
-    if (res.success) store.login(res.user);
-    return res;
+  async restoreSession,
+
+  /** credentials: { identifier, password } — identifier is Login ID OR email. */
+  async login({ identifier, password }) {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ loginIdentifier: identifier, password }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || json.success === false) {
+      const err = new Error((json && json.message) || 'Login failed');
+      err.status = res.status;
+      throw err;
+    }
+    const uiUser = toUiUser(json.data);
+    cacheSession(json.data.token, uiUser);
+    return { success: true, user: uiUser };
   },
 
-  /** Register new account -> backend API POST /api/v1/auth/signup */
-  async signup(registrationData) {
-    const res = await mockSignup(registrationData);
-    if (res.success) store.login(res.user);
-    return res;
+  /** payload: { email, password, firstName, lastName, role?, department? } */
+  async signup(payload) {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: payload.email,
+        password: payload.password,
+        firstName: payload.firstName,
+        lastName: payload.lastName,
+        department: payload.department || undefined,
+        role: payload.role && payload.role !== 'Employee' ? 'ADMIN_HR' : undefined,
+      }),
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok || !json || json.success === false) {
+      const err = new Error((json && json.message) || 'Registration failed');
+      err.status = res.status;
+      err.errors = json && json.errors;
+      throw err;
+    }
+    const uiUser = toUiUser(json.data);
+    cacheSession(json.data.token, uiUser);
+    return { success: true, user: uiUser };
   },
 
-  logout() {
-    store.logout();
-  }
+  async logout() {
+    try {
+      if (getToken()) await api.post('/api/auth/logout', {});
+    } catch (_) {
+      /* token already invalid — clearing local session is enough */
+    }
+    clearSession();
+  },
 };

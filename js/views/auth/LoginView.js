@@ -1,4 +1,4 @@
-// DAYFLOW HRMS — LOGIN VIEW
+// DAYFLOW HRMS — LOGIN VIEW (REAL BACKEND AUTH)
 
 import { authService } from '../../core/authService.js';
 import { router } from '../../core/router.js';
@@ -23,28 +23,18 @@ export function createLoginView() {
             <form id="login-form">
               <div class="form-group">
                 <label class="form-label required" for="email">Login ID or Corporate Email</label>
-                <input type="text" id="email" class="form-input" placeholder="Your assigned Login ID or corporate email" value="sarah.jenkins@dayflow.com" required />
+                <input type="text" id="email" class="form-input" placeholder="Your assigned Login ID or corporate email" autocomplete="username" required />
                 <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">Your Login ID is assigned by HR/Admin after account activation.</div>
               </div>
 
               <div class="form-group">
                 <label class="form-label required" for="password">Password</label>
                 <div class="input-wrapper">
-                  <input type="${showPassword ? 'text' : 'password'}" id="password" class="form-input" placeholder="••••••••" value="password123" required />
+                  <input type="${showPassword ? 'text' : 'password'}" id="password" class="form-input" placeholder="••••••••" autocomplete="current-password" required />
                   <button type="button" class="input-toggle-pwd" id="toggle-pwd-btn" title="Show/Hide password">
                     <i data-lucide="${showPassword ? 'eye-off' : 'eye'}" style="width: 18px; height: 18px;"></i>
                   </button>
                 </div>
-              </div>
-
-              <!-- Role Selector for Frontend Testing -->
-              <div class="form-group">
-                <label class="form-label" for="role">Role (Dev Selector)</label>
-                <select id="role" class="form-select">
-                  <option value="Employee" selected>Employee</option>
-                  <option value="Admin">Admin / HR (Mock)</option>
-                </select>
-                <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">Select "Admin / HR (Mock)" to open the HR console.</div>
               </div>
 
               <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-submit-btn" style="margin-top: 8px;">
@@ -66,6 +56,13 @@ export function createLoginView() {
       const togglePwdBtn = document.getElementById('toggle-pwd-btn');
       const errorBanner = document.getElementById('auth-error-banner');
 
+      const showError = (msg) => {
+        if (errorBanner) {
+          errorBanner.textContent = msg;
+          errorBanner.style.display = 'block';
+        }
+      };
+
       if (togglePwdBtn) {
         togglePwdBtn.addEventListener('click', () => {
           showPassword = !showPassword;
@@ -79,15 +76,11 @@ export function createLoginView() {
       if (form) {
         form.addEventListener('submit', async (e) => {
           e.preventDefault();
-          const emailInput = document.getElementById('email').value.trim();
-          const password = document.getElementById('password').value.trim();
-          const role = document.getElementById('role').value;
+          const identifier = document.getElementById('email').value.trim();
+          const password = document.getElementById('password').value;
 
-          if (!emailInput || !password) {
-            if (errorBanner) {
-              errorBanner.textContent = 'Please provide both Login ID/email and password.';
-              errorBanner.style.display = 'block';
-            }
+          if (!identifier || !password) {
+            showError('Please provide both Login ID/email and password.');
             return;
           }
 
@@ -99,22 +92,19 @@ export function createLoginView() {
           }
 
           try {
-            const res = await authService.login({
-              loginId: emailInput.includes('@') ? null : emailInput,
-              email: emailInput.includes('@') ? emailInput : 'sarah.jenkins@dayflow.com',
-              password: password,
-              role: role
-            });
-
-            if (res.success) {
-              showToast(`Welcome back, ${res.user.name.split(' ')[0]}!`, 'success');
-              // Route to the correct portal based on the selected role
-              router.navigate(res.user.role === 'Admin' ? '/admin/dashboard' : '/employee/dashboard');
-            }
+            // Backend authentication is authoritative — the returned user's
+            // backend role decides which portal opens.
+            const res = await authService.login({ identifier, password });
+            showToast(`Welcome back, ${res.user.name.split(' ')[0]}!`, 'success');
+            router.navigate(res.user.role === 'Admin' ? '/admin/dashboard' : '/employee/dashboard');
           } catch (err) {
-            if (errorBanner) {
-              errorBanner.textContent = 'Authentication failed. Please check your credentials.';
-              errorBanner.style.display = 'block';
+            if (err && err.status === 0) showError(err.message);
+            else if (err && err.status === 401) showError('Invalid credentials. Please check your Login ID/email and password.');
+            else showError((err && err.message) || 'Authentication failed. Please try again.');
+            if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.innerHTML = `<span>Sign In</span> <i data-lucide="arrow-right" style="width: 18px; height: 18px;"></i>`;
+              if (window.lucide) window.lucide.createIcons();
             }
           }
         });

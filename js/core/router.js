@@ -9,8 +9,10 @@ class Router {
     this.routes = {};
     this.currentView = null;
 
+    // NOTE: only hashchange is wired here. The initial render is triggered
+    // exactly once by app.js on DOMContentLoaded — a second listener here
+    // caused every page to double-render on first load.
     window.addEventListener('hashchange', () => this.handleRoute());
-    window.addEventListener('DOMContentLoaded', () => this.handleRoute());
   }
 
   addRoute(path, viewHandler) {
