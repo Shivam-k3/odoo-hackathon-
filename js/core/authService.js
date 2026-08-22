@@ -22,6 +22,23 @@ async function mockLogin(credentials) {
   // Simulated network delay for frontend prototype
   await new Promise(resolve => setTimeout(resolve, MOCK_NETWORK_DELAY_MS));
 
+  // Admin/HR mock session (frontend prototype only)
+  if (credentials.role === 'Admin') {
+    return {
+      success: true,
+      user: {
+        id: 'ADM-0001', // placeholder until backend assigns real Login ID
+        name: 'Priya Sharma',
+        email: credentials.email || 'priya.sharma@dayflow.com',
+        role: 'Admin',
+        avatar: null,
+        department: 'Human Resources',
+        designation: 'HR Manager',
+        joiningDate: '2020-04-06'
+      }
+    };
+  }
+
   // Backend-provided user object schema.
   // NOTE: Login ID is ALWAYS assigned by the backend system upon account
   // activation. The id below is a frontend prototype placeholder only and is

@@ -42,8 +42,9 @@ export function createLoginView() {
                 <label class="form-label" for="role">Role (Dev Selector)</label>
                 <select id="role" class="form-select">
                   <option value="Employee" selected>Employee</option>
-                  <option value="Admin">Admin (Mock)</option>
+                  <option value="Admin">Admin / HR (Mock)</option>
                 </select>
+                <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">Select "Admin / HR (Mock)" to open the HR console.</div>
               </div>
 
               <button type="submit" class="btn btn-primary btn-block btn-lg" id="login-submit-btn" style="margin-top: 8px;">
@@ -107,7 +108,8 @@ export function createLoginView() {
 
             if (res.success) {
               showToast(`Welcome back, ${res.user.name.split(' ')[0]}!`, 'success');
-              router.navigate('/employee/dashboard');
+              // Route to the correct portal based on the selected role
+              router.navigate(res.user.role === 'Admin' ? '/admin/dashboard' : '/employee/dashboard');
             }
           } catch (err) {
             if (errorBanner) {
