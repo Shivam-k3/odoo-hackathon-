@@ -603,3 +603,181 @@ All APIs return a consistent JSON response structure:
   }
 }
 ```
+
+---
+
+## 4. Leave Management APIs (Member 2)
+
+### Leave Types & Quotas
+| Type | Paid | Annual Quota | Notes |
+|------|------|--------------|-------|
+| `PTO` | Yes | 12 days | Standard paid time off |
+| `SICK` | Yes | 6 days | Requires medical certificate attachment (PDF/JPEG/PNG/WEBP) |
+| `UNPAID` | No | Unlimited | `entitled` is `null` |
+
+### 4.1 Apply for Leave (multipart/form-data)
+* **Method**: `POST`
+* **URL**: `/api/leaves`
+* **Authentication**: Required (`EMPLOYEE`, `ADMIN_HR`)
+* **Body** (`multipart/form-data`): `leaveType` (PTO/SICK/UNPAID), `startDate` (YYYY-MM-DD), `endDate` (YYYY-MM-DD), `remarks` (optional, max 500), `certificate` (file; mandatory when `leaveType=SICK`)
+* **Rules**: requested days are computed server-side (inclusive calendar days); overlapping PENDING/APPROVED requests are rejected with 409; insufficient balance returns 422.
+* **Success Response (201 Created)**: leave request object with status `PENDING`, plus a `LEAVE_SUBMITTED` notification.
+
+### 4.2 My Leave Requests
+* **Method**: `GET`
+* **URL**: `/api/leaves/me?status=PENDING&year=2026`
+* **Authentication**: Required
+* **Success Response (200 OK)**: paginated list of the caller's own requests with allocation summary.
+
+### 4.3 My Leave Allocations
+* **Method**: `GET`
+* **URL**: `/api/leaves/allocations/me?year=2026`
+* **Authentication**: Required
+* **Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Leave allocations retrieved",
+  "data": {
+    "year": 2026,
+    "allocations": [
+      { "leaveType": "PTO", "entitled": 12.0, "used": 2.0, "remaining": 10.0 }
+    ]
+  }
+}
+```
+
+### 4.4 Leave Request Detail (owner)
+* **Method**: `GET`
+* **URL**: `/api/leaves/:id`
+* **Authentication**: Required (owner only)
+* **Success Response (200 OK)**: full request incl. decision info and attachment URL.
+
+### 4.5 Admin: List Leave Requests
+* **Method**: `GET`
+* **URL**: `/api/admin/leaves?status=PENDING&leaveType=PTO&employeeId=<uuid>&page=1&limit=20`
+* **Role**: `ADMIN_HR` only
+* **Success Response (200 OK)**: paginated requests with employee names/departments.
+
+### 4.6 Admin: Approve / Reject
+* **Methods**: `POST /api/admin/leaves/:id/approve`, `POST /api/admin/leaves/:id/reject`
+* **Body**: `{ "comment": "..." }` (optional)
+* **Rules**: only `PENDING` requests can be decided (409 otherwise); approval atomically increments the allocation inside a transaction; actor + timestamp recorded; decision notifications created.
+* **Error Responses**: `404` not found, `409` already decided.
+
+---
+
+## 5. Payroll APIs (Member 2)
+
+### Salary Formula (authoritative server-side calculation)
+```
+Basic            = 50%    of Monthly Wage
+HRA              = 50%    of Basic
+StandardAllow    = 16.67% of Basic
+PerformanceBonus = 8.33%  of Basic
+LTA              = 8.333% of Basic
+FixedAllowance   = Monthly Wage - sum(all above)
+EmployeePF       = 12% of Basic      EmployerPF = 12% of Basic
+ProfessionalTax  = INR 200/month     NetPay = Gross - EmployeePF - PT
+```
+
+### 5.1 Admin: Create Salary Structure
+* **Method**: `POST`
+* **URL**: `/api/admin/payroll/:employeeId`
+* **Role**: `ADMIN_HR` only
+* **Body**: `{ "monthlyWage": 50000 }` — component values sent by clients are ignored; everything is derived from the wage. Duplicate active structure returns 409. Every create/update writes a `SalaryAudit` row (actor, old/new wage).
+* **Success Response (201 Created)**: structure + computed components (e.g. wage 50000 -> Basic 25000, HRA 12500, Std 4167.50, Bonus 2082.50, LTA 2083.25, Fixed 4166.75, Gross 50000, PF 3000/3000, PT 200, NetPay 46800).
+
+### 5.2 Admin: Update Salary Structure
+* **Method**: `PUT`
+* **URL**: `/api/admin/payroll/:employeeId`
+* **Role**: `ADMIN_HR` only
+* **Success Response (200 OK)**: updated structure; audit trail appended.
+
+### 5.3 Admin: List Salary Structures / View One
+* **Methods**: `GET /api/admin/payroll`, `GET /api/admin/payroll/:employeeId`
+* **Role**: `ADMIN_HR` only
+
+### 5.4 My Salary Structure (read-only)
+* **Method**: `GET`
+* **URL**: `/api/payroll/me`
+* **Authentication**: Required
+* **Success Response (200 OK)**: own components + currency `INR`. Employees can never write payroll data.
+
+### 5.5 My Payslip
+* **Method**: `GET`
+* **URL**: `/api/payroll/payslip?year=2026&month=8`
+* **Authentication**: Required
+* **Success Response (200 OK)**: payslip for the period or `404` if none exists.
+
+### 5.6 My Payable Days
+* **Method**: `GET`
+* **URL**: `/api/payroll/me/payable-days?month=2026-08`
+* **Authentication**: Required
+* **Logic**: weekends excluded; approved *paid* leave counts as payable (takes precedence over attendance rows); unpaid leave does not; PRESENT=1, HALF_DAY=0.5, ABSENT/missing=not payable.
+* **Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "data": {
+    "month": "2026-08",
+    "workingDays": 21,
+    "presentDays": 16,
+    "paidLeaveDays": 2,
+    "unpaidLeaveDays": 1,
+    "absentDays": 2,
+    "payableDays": 18
+  }
+}
+```
+
+### 5.7 Admin: Generate Payslip
+* **Method**: `POST`
+* **URL**: `/api/admin/payroll/:employeeId/generate-payslip`
+* **Body**: `{ "month": "2026-08" }`
+* **Rules**: payable days come exclusively from the backend engine; regeneration overwrites the same period (no duplicates); creates a `PAYSLIP_AVAILABLE` notification.
+* **Success Response (201 Created)**: full payslip snapshot (workingDays, payableDays, all earnings/deductions, netPay).
+
+---
+
+## 6. Notifications (internal)
+
+In-app notifications are stored in the `notifications` table for later polling endpoints. Email delivery uses a pluggable provider; with none configured, emails are logged and marked as not delivered (`delivered: false`). Notification types emitted today: `LEAVE_SUBMITTED`, `LEAVE_APPROVED`, `LEAVE_REJECTED`, `PAYSLIP_AVAILABLE`.
+
+---
+
+## 7. Admin Dashboard Analytics & Reports APIs (Member 2)
+
+### 7.1 Dashboard Overview (all values live from the DB)
+* **Method**: `GET`
+* **URL**: `/api/admin/dashboard`
+* **Role**: `ADMIN_HR` only
+* **Success Response (200 OK)**:
+```json
+{
+  "success": true,
+  "message": "Dashboard overview retrieved",
+  "data": {
+    "employees": {
+      "totalActive": 100,
+      "presentToday": 82,
+      "halfDayToday": 5,
+      "onApprovedLeaveToday": 8,
+      "absentToday": 5
+    },
+    "leaves": { "pendingRequests": 12, "approvedTotal": 340 },
+    "attendanceSummary": { "month": "2026-08", "present": 1500, "halfDay": 60, "absent": 90, "totalRecords": 1650 },
+    "payrollSummary": { "payslipsGenerated": 95, "totalNet": 4420000.0, "currency": "INR" }
+  }
+}
+```
+
+### 7.2 Reports (JSON or CSV via `format=json|csv`)
+* **Attendance**: `GET /api/admin/reports/attendance?from=&to=&department=&status=&format=json`
+* **Leaves**: `GET /api/admin/reports/leaves?from=&to=&leaveType=&status=&format=json`
+* **Payroll**: `GET /api/admin/reports/payroll?month=2026-08&department=` — component totals + currency INR
+* **Employees**: `GET /api/admin/reports/employees?search=&department=&status=` — grouped by department; salary fields never included
+* CSV responses use content type `text/csv` with RFC-4180 escaping.
+
+### Security Summary
+All `/api/admin/*` endpoints require a valid JWT plus the `ADMIN_HR` role; employees receive `403`, anonymous callers `401`.
