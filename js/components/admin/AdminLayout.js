@@ -42,11 +42,14 @@ export function initAdminLayoutEvents() {
   });
 }
 
-// Re-render just the page content area after async mock loads or state changes.
+// Re-render just the page content area after async state changes.
+// NOTE: innerHTML replacement destroys the navbar/sidebar listeners, so the
+// layout bindings MUST be re-initialized alongside the view's own events.
 export function rerenderPageContent(view) {
   const app = document.getElementById('app');
   if (!app) return;
   app.innerHTML = view.render();
   if (window.lucide) window.lucide.createIcons();
+  initAdminLayoutEvents();
   view.bindEvents();
 }
