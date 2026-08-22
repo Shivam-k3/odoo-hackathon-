@@ -5,6 +5,8 @@ import attendanceRoutes from './attendance.routes';
 import leaveRoutes from './leave.routes';
 import leaveAdminRoutes from './leave.admin.routes';
 import notificationRoutes from './notification.routes';
+import payrollRoutes from './payroll.routes';
+import payrollAdminRoutes from './payroll.admin.routes';
 
 const router = Router();
 
@@ -23,5 +25,7 @@ router.use('/attendance', attendanceRoutes);
 router.use('/leaves', leaveRoutes);
 router.use('/admin/leaves', leaveAdminRoutes);
 router.use('/notifications', notificationRoutes);
+router.use('/payroll', payrollRoutes);
+router.use('/admin/payroll', payrollAdminRoutes);
 
 export default router;
