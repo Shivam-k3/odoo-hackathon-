@@ -12,7 +12,14 @@ import { StatusBadge } from '../../components/admin/StatusBadge.js';
 import { showToast } from '../../components/Toast.js';
 
 export function createAdminDashboardView() {
-  const ui = { loaded: false, stats: null, employees: [], pendingLeaves: [], error: null };
+  const ui = {
+    loaded: false,
+    stats: null,
+    employees: [],
+    pendingLeaves: [],
+    error: null,
+    leaveInsight: { pending: 0, approved: 0, rejected: 0, topType: '', topTypeCount: 0 },
+  };
 
   function skeletonHtml() {
     return `
@@ -69,6 +76,141 @@ export function createAdminDashboardView() {
     `;
   }
 
+  // ------------------------------------------------ WORKFORCE INTELLIGENCE
+  // Deterministic insights computed from live dashboard + leave API values.
+  // No external AI provider — transparent rules over real aggregates.
+
+  function intelAlerts(emp) {
+    const alerts = [];
+    const present = emp.presentToday ?? 0;
+    const absent = emp.absentToday ?? 0;
+    const halfDay = emp.halfDayToday ?? 0;
+    const onLeave = emp.onApprovedLeaveToday ?? 0;
+    const total = emp.totalActive ?? 0;
+    const pending = ui.leaveInsight.pending;
+
+    if (total > 0 && absent > present) {
+      alerts.push({ tone: 'danger', icon: 'alert-triangle', text: `Attendance requires attention — absenteeism is elevated (${absent} absent vs ${present} present).` });
+    }
+    if (pending > 0) {
+      alerts.push({ tone: 'warning', icon: 'clock', text: `${pending} leave request${pending === 1 ? ' is' : 's are'} awaiting HR action.` });
+    }
+    if (halfDay >= 3 || (present > 0 && halfDay / present >= 0.25)) {
+      alerts.push({ tone: 'warning', icon: 'timer', text: `Half-day attendance is higher than expected (${halfDay} today).` });
+    }
+    if (onLeave > 0 && total > 0 && (onLeave / total) >= 0.2) {
+      alerts.push({ tone: 'info', icon: 'plane', text: `${onLeave} employees (${Math.round((onLeave / total) * 100)}% of workforce) are on approved leave today.` });
+    }
+    if (!alerts.length) {
+      alerts.push({ tone: 'success', icon: 'check-circle-2', text: 'Workforce attendance is currently stable.' });
+    }
+    return alerts;
+  }
+
+  const intelToneStyles = {
+    danger: ['var(--danger-bg)', 'var(--danger)'],
+    warning: ['var(--warning-bg)', '#b06000'],
+    info: ['var(--info-bg)', 'var(--info)'],
+    success: ['var(--success-bg)', 'var(--success)'],
+  };
+
+  function intelChip(label, value) {
+    return `
+      <div style="flex:1; min-width:110px; background:var(--bg-secondary); border-radius:12px; padding:12px 14px;">
+        <div style="font-size:11px; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:.4px;">${esc(label)}</div>
+        <div style="font-size:20px; font-weight:700; margin-top:2px;">${esc(String(value))}</div>
+      </div>
+    `;
+  }
+
+  function workforceIntelHtml() {
+    const s = ui.stats;
+    const emp = s.employees;
+    const att = s.attendanceSummary;
+    const li = ui.leaveInsight;
+
+    const total = emp.totalActive ?? 0;
+    const present = emp.presentToday ?? 0;
+    const absent = emp.absentToday ?? 0;
+    const halfDay = emp.halfDayToday ?? 0;
+    const onLeave = emp.onApprovedLeaveToday ?? 0;
+    const attRate = total ? Math.round(((present + halfDay) / total) * 100) : 0;
+
+    const alerts = intelAlerts(emp);
+
+    const LEAVE_TYPE_LABELS = { PTO: 'Paid Time Off', SICK: 'Sick Leave', UNPAID: 'Unpaid Leave' };
+
+    // Executive-style summary composed from the same live metrics
+    const parts = [];
+    if (total > 0) {
+      parts.push(`Today, ${present} of ${total} employees (${attRate}% coverage incl. half-days) are at work`);
+      if (absent > 0) parts.push(`${absent} absent`);
+      if (onLeave > 0) parts.push(`${onLeave} on approved leave`);
+    } else {
+      parts.push('No active employee data available yet');
+    }
+    let summary = parts.join(', ') + '.';
+    if (li.pending > 0) {
+      summary += ` HR attention is currently focused on ${li.pending} pending leave request${li.pending === 1 ? '' : 's'}`;
+      if (li.topType) summary += `, with ${LEAVE_TYPE_LABELS[li.topType] || li.topType} being the most requested type`;
+      summary += '.';
+    } else if (alerts[0].tone === 'success') {
+      summary += ' No exceptions require action right now.';
+    }
+
+    return `
+      <div class="card" style="margin-bottom:24px; border-left:3px solid var(--primary);">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i data-lucide="sparkles" style="width:18px; height:18px; color:var(--primary);"></i>
+            <span>Workforce Intelligence</span>
+          </h3>
+          <span class="badge badge-info">Live data · rule-based insights</span>
+        </div>
+
+        <!-- Attendance health -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px;">
+          ${intelChip('Attendance Rate', `${attRate}%`)}
+          ${intelChip('Present Today', present)}
+          ${intelChip('Absent Today', absent)}
+          ${intelChip('Half-Day Today', halfDay)}
+          ${intelChip('On Leave', onLeave)}
+          ${intelChip(`Hours Logged (${esc(att.month || '')})`, `${Number(att.totalWorkHours ?? 0).toFixed(1)}h`)}
+        </div>
+
+        <!-- Smart HR alerts -->
+        <div style="display:flex; flex-direction:column; gap:8px; margin-bottom:16px;">
+          ${alerts.map(a => {
+            const [bg, fg] = intelToneStyles[a.tone];
+            return `
+              <div style="display:flex; align-items:center; gap:10px; background:${bg}; color:${fg}; border-radius:10px; padding:10px 14px; font-size:13px; font-weight:500;">
+                <i data-lucide="${a.icon}" style="width:15px; height:15px; flex-shrink:0;"></i>
+                <span>${esc(a.text)}</span>
+              </div>
+            `;
+          }).join('')}
+        </div>
+
+        <!-- Leave insight + summary -->
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr)); gap:16px;">
+          <div style="background:var(--bg-secondary); border-radius:12px; padding:14px 16px;">
+            <div style="font-size:11px; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:.4px; margin-bottom:8px;">Leave Insight</div>
+            <div style="display:flex; gap:14px; font-size:13px; flex-wrap:wrap;">
+              <span><strong>${li.pending}</strong> pending</span>
+              <span><strong style="color:var(--success);">${li.approved}</strong> approved</span>
+              <span><strong style="color:var(--danger);">${li.rejected}</strong> rejected</span>
+              ${li.topType ? `<span class="badge badge-warning">${esc(LEAVE_TYPE_LABELS[li.topType] || li.topType)}: ${li.topTypeCount}</span>` : ''}
+            </div>
+          </div>
+          <div style="background:var(--bg-secondary); border-radius:12px; padding:14px 16px;">
+            <div style="font-size:11px; color:var(--text-tertiary); text-transform:uppercase; letter-spacing:.4px; margin-bottom:8px;">Workforce Summary</div>
+            <p style="font-size:13px; line-height:1.55; color:var(--text-secondary); margin:0;">${esc(summary)}</p>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   function contentHtml() {
     const s = ui.stats;
     const emp = s.employees;
@@ -104,6 +246,9 @@ export function createAdminDashboardView() {
         ${StatisticsCard({ icon: 'plane', iconBg: 'var(--info-bg)', iconColor: 'var(--info)', value: emp.onApprovedLeaveToday ?? 0, label: 'On Approved Leave' })}
         ${StatisticsCard({ icon: 'x-circle', iconBg: 'var(--warning-bg)', iconColor: '#b06000', value: emp.absentToday ?? 0, label: 'Absent Today', trendText: emp.halfDayToday ? `+${emp.halfDayToday} half-day` : '', trendDir: 'flat' })}
       </div>
+
+      <!-- Workforce Intelligence -->
+      ${workforceIntelHtml()}
 
       <!-- Attendance overview + Payroll overview -->
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:24px; margin-bottom:24px;">
@@ -194,14 +339,30 @@ export function createAdminDashboardView() {
   async function loadData() {
     try {
       ui.error = null;
-      const [stats, empPage, pending] = await Promise.all([
+      const [stats, empPage, pending, approved, rejected, allLeaves] = await Promise.all([
         adminStore.getDashboardStats(),
         adminStore.queryEmployees({ page: 1, limit: 8 }),
         adminStore.getLeaves({ status: 'PENDING', limit: 10 }),
+        adminStore.getLeaves({ status: 'APPROVED', limit: 1 }),
+        adminStore.getLeaves({ status: 'REJECTED', limit: 1 }),
+        adminStore.getLeaves({ limit: 300 }),
       ]);
       ui.stats = stats;
       ui.employees = (empPage.employees || []).map(uiEmployee);
       ui.pendingLeaves = pending.records || [];
+      // Leave insight — real totals from the leave API + type distribution
+      const typeCounts = {};
+      for (const r of allLeaves.records || []) {
+        if (r.leaveType) typeCounts[r.leaveType] = (typeCounts[r.leaveType] || 0) + 1;
+      }
+      const top = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
+      ui.leaveInsight = {
+        pending: pending.total ?? ui.pendingLeaves.length,
+        approved: approved.total ?? 0,
+        rejected: rejected.total ?? 0,
+        topType: top ? top[0] : '',
+        topTypeCount: top ? top[1] : 0,
+      };
       ui.loaded = true;
     } catch (err) {
       ui.error = err.message || 'Failed to load dashboard.';
