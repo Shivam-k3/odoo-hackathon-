@@ -23,6 +23,7 @@ router.get('/health', (req, res) => {
 
 router.use('/auth', authRoutes);
 router.use('/employees', employeeRoutes);
+router.use('/admin/employees', employeeRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/leaves', leaveRoutes);
 router.use('/admin/leaves', leaveAdminRoutes);
